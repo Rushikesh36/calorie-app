@@ -3,6 +3,7 @@ import { TopNav } from '@/components/top-nav';
 import { getLogsInRange } from '@/app/actions';
 import { dailyCalorieTarget } from '@/lib/meal-catalog';
 import type { DailyLogEntry } from '@/lib/types';
+import StatusClient from '@/components/status-client';
 
 type RangeKey = 'week' | 'month' | 'all';
 
@@ -97,40 +98,8 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
   const window = config.days ? createWindow(config.days) : null;
 
   const logs = window ? await getLogsInRange({ start: window.start, end: window.end }) : await getLogsInRange();
+  // We will render aggregates and labels on the client so they use the user's local timezone.
   const totalCalories = getDayTotal(logs);
-  const uniqueDays = new Set(logs.map((log) => dayKey(new Date(log.timestamp)))).size || (window?.dates.length ?? 1);
-  const averagePerDay = uniqueDays > 0 ? totalCalories / uniqueDays : 0;
-  const inRangeDays = window
-    ? window.dates.filter((date) => {
-        const key = dayKey(date);
-        const entries = groupByDay(logs).get(key) ?? [];
-        const dayCalories = getDayTotal(entries);
-        return dayCalories >= dailyCalorieTarget.minimum && dayCalories <= dailyCalorieTarget.maximum;
-      }).length
-    : 0;
-
-  const groupedDays = window
-    ? window.dates.map((date) => {
-        const key = dayKey(date);
-        const entries = groupByDay(logs).get(key) ?? [];
-        const calories = getDayTotal(entries);
-
-        return {
-          label: formatDayLabel(date),
-          calories,
-          entries: entries.length,
-          inRange: calories >= dailyCalorieTarget.minimum && calories <= dailyCalorieTarget.maximum,
-        };
-      })
-    : [];
-
-  const bestDay = groupedDays.reduce(
-    (top, day) => (day.calories > top.calories ? day : top),
-    { label: 'No data', calories: 0, entries: 0, inRange: false },
-  );
-  const topFoods = buildTopFoods(logs);
-  const maxBarCalories = Math.max(dailyCalorieTarget.maximum, ...groupedDays.map((day) => day.calories), 1);
-  const totalProgress = Math.min((totalCalories / (dailyCalorieTarget.maximum * Math.max(uniqueDays, 1))) * 100, 100);
 
   return (
     <main className="min-h-screen px-4 py-4 sm:px-6 lg:px-8">
@@ -193,29 +162,7 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
 
             {window ? (
               <div className="mt-6 space-y-3">
-                {groupedDays.map((day) => {
-                  const width = Math.max((day.calories / maxBarCalories) * 100, day.calories > 0 ? 8 : 2);
-
-                  return (
-                    <div key={day.label} className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3">
-                      <div className="flex items-center justify-between gap-4 text-sm">
-                        <div>
-                          <div className="font-medium text-white">{day.label}</div>
-                          <div className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-500">{day.entries} entries</div>
-                        </div>
-                        <div className={`rounded-full px-3 py-1 text-xs font-semibold ${day.inRange ? 'bg-emerald-400/15 text-emerald-100' : 'bg-slate-800 text-slate-300'}`}>
-                          {formatCalories(day.calories)} kcal
-                        </div>
-                      </div>
-                      <div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-800/80">
-                        <div
-                          className={`h-full rounded-full transition-all ${day.inRange ? 'bg-gradient-to-r from-emerald-400 via-cyan-400 to-sky-400' : 'bg-gradient-to-r from-slate-500 via-cyan-400 to-slate-300'}`}
-                          style={{ width: `${width}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+                <StatusClient logs={logs} rangeLabel={config.label} windowDates={window.dates.map((d) => d.toISOString())} />
               </div>
             ) : null}
           </div>
