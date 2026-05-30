@@ -5,6 +5,19 @@ import { mealCatalogByName } from '@/lib/meal-catalog';
 import { getSupabaseClient } from '@/lib/supabase';
 import type { ActionResult, DailyLogEntry } from '@/lib/types';
 
+const mealCatalogById = Object.values(mealCatalogByName).reduce<Record<number, (typeof mealCatalogByName)[string]>>((lookup, item) => {
+  lookup[item.id] = item;
+  return lookup;
+}, {});
+
+function resolveFood(row: any) {
+  if (row.food_id === null || row.food_id === undefined) {
+    return null;
+  }
+
+  return mealCatalogById[Number(row.food_id)] ?? null;
+}
+
 function normalizeLogRow(row: any): DailyLogEntry {
   return {
     id: Number(row.id),
@@ -12,7 +25,7 @@ function normalizeLogRow(row: any): DailyLogEntry {
     custom_name: row.custom_name ?? null,
     custom_calories: row.custom_calories === null || row.custom_calories === undefined ? null : Number(row.custom_calories),
     timestamp: row.timestamp,
-    food: null,
+    food: resolveFood(row),
   };
 }
 
