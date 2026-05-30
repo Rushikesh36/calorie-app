@@ -83,7 +83,7 @@ export default function StatusClient({ logs, rangeLabel, windowDates = null }: P
   }, [logs]);
 
   const maxBarCalories = Math.max(dailyCalorieTarget.maximum, ...groupedDays.map((day) => day.calories), 1);
-  const totalProgress = Math.min((totalCalories / (dailyCalorieTarget.maximum * Math.max(uniqueDays, 1))) * 100, 100);
+  const totalProgressValue = Math.min((totalCalories / (dailyCalorieTarget.maximum * Math.max(uniqueDays, 1))) * 100, 100);
 
   return (
     <div>
