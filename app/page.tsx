@@ -1,10 +1,10 @@
 import { CalorieDashboard } from '@/components/calorie-dashboard';
 import { TopNav } from '@/components/top-nav';
-import { getTodaysLogs } from '@/app/actions';
+import { getLogsInRange } from '@/app/actions';
 import { hasSupabaseCredentials } from '@/lib/supabase';
 
 export default async function HomePage() {
-  const initialLogs = await getTodaysLogs();
+  const initialLogs = await getLogsInRange();
   const canPersist = hasSupabaseCredentials();
 
   return (

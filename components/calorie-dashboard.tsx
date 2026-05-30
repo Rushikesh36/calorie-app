@@ -1,8 +1,8 @@
 'use client';
 
 import type { FormEvent } from 'react';
-import { useMemo, useState } from 'react';
-import { addCustomLog, addFoodLog, deleteLog } from '@/app/actions';
+import { useEffect, useMemo, useState } from 'react';
+import { addCustomLog, addFoodLog, deleteLog, updateLog } from '@/app/actions';
 import { dailyCalorieTarget, mealCatalog, mealCatalogByName } from '@/lib/meal-catalog';
 import type { DailyLogEntry } from '@/lib/types';
 
@@ -19,6 +19,12 @@ type TimeOfDayBucket = {
   helper: string;
   hours: [number, number];
   itemNames: string[];
+};
+
+type LogDraft = {
+  label: string;
+  calories: string;
+  timestamp: string;
 };
 
 const timeOfDayBuckets: TimeOfDayBucket[] = [
@@ -106,6 +112,36 @@ function getTimeOfDayBucket(key: TimeOfDayKey) {
 
 function getItemNamesForBucket(bucket: TimeOfDayBucket) {
   return bucket.itemNames;
+}
+
+function getLocalDateKey(date: Date) {
+  return new Intl.DateTimeFormat('en-CA').format(date);
+}
+
+function getDateFromKey(dateKey: string) {
+  return new Date(`${dateKey}T12:00:00`);
+}
+
+function formatDateTimeInputValue(timestamp: string) {
+  const date = new Date(timestamp);
+  const pad = (value: number) => String(value).padStart(2, '0');
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function buildTimestampForSelectedDate(dateKey: string) {
+  const now = new Date();
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const timestamp = new Date(now);
+
+  timestamp.setFullYear(year, month - 1, day);
+  timestamp.setSeconds(0, 0);
+
+  return timestamp.toISOString();
+}
+
+function formatDateKeyLabel(dateKey: string) {
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(getDateFromKey(dateKey));
 }
 
 function getFoodName(log: DailyLogEntry) {
@@ -428,7 +464,7 @@ function extractPlainTextEntry(rawText: string, fallbackCaloriesText: string) {
   }).format(new Date(timestamp));
 }
 
-function createFoodLog(foodName: string): DailyLogEntry | null {
+function createFoodLog(foodName: string, timestamp: string): DailyLogEntry | null {
   const food = mealCatalogByName[foodName];
 
   if (!food) {
@@ -440,40 +476,87 @@ function createFoodLog(foodName: string): DailyLogEntry | null {
     food_id: food.id,
     custom_name: null,
     custom_calories: null,
-    timestamp: new Date().toISOString(),
+    timestamp,
     food,
   };
 }
 
-function createCustomLog(customName: string, calories: number): DailyLogEntry {
+function createCustomLog(customName: string, calories: number, timestamp: string): DailyLogEntry {
   return {
     id: Date.now(),
     food_id: null,
     custom_name: customName,
     custom_calories: calories,
-    timestamp: new Date().toISOString(),
+    timestamp,
     food: null,
   };
 }
 
 export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardProps) {
   const [logs, setLogs] = useState<DailyLogEntry[]>(initialLogs);
+  const [selectedDate, setSelectedDate] = useState(() => getLocalDateKey(new Date()));
+  const [followToday, setFollowToday] = useState(true);
   const [pendingLabel, setPendingLabel] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [plainTextItem, setPlainTextItem] = useState('');
   const [plainTextCalories, setPlainTextCalories] = useState('');
   const [selectedBucket, setSelectedBucket] = useState<TimeOfDayKey>(getAutoTimeOfDay());
+  const [editingLogId, setEditingLogId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<LogDraft | null>(null);
+
+  useEffect(() => {
+    if (!followToday) {
+      return;
+    }
+
+    let timeoutId = window.setTimeout(function tick() {
+      setSelectedDate(getLocalDateKey(new Date()));
+
+      const now = new Date();
+      const nextMidnight = new Date(now);
+      nextMidnight.setHours(24, 0, 0, 25);
+
+      timeoutId = window.setTimeout(tick, nextMidnight.getTime() - now.getTime());
+    }, (() => {
+      const now = new Date();
+      const nextMidnight = new Date(now);
+      nextMidnight.setHours(24, 0, 0, 25);
+      return nextMidnight.getTime() - now.getTime();
+    })());
+
+    return () => window.clearTimeout(timeoutId);
+  }, [followToday]);
+
+  const todayKey = getLocalDateKey(new Date());
+  const selectedDayLogs = useMemo(
+    () =>
+      [...logs]
+        .filter((log) => getLocalDateKey(new Date(log.timestamp)) === selectedDate)
+        .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime()),
+    [logs, selectedDate],
+  );
+
+  useEffect(() => {
+    if (editingLogId === null) {
+      return;
+    }
+
+    if (!selectedDayLogs.some((log) => log.id === editingLogId)) {
+      setEditingLogId(null);
+      setEditDraft(null);
+    }
+  }, [editingLogId, selectedDayLogs]);
 
   const totalCalories = useMemo(
     () =>
-      logs.reduce((sum, log) => {
+      selectedDayLogs.reduce((sum, log) => {
         if (log.food) {
           return sum + log.food.calories;
         }
 
         return sum + (log.custom_calories ?? 0);
       }, 0),
-    [logs],
+    [selectedDayLogs],
   );
 
   const progress = Math.min((totalCalories / dailyCalorieTarget.maximum) * 100, 100);
@@ -490,9 +573,98 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
   const catalogSuggestions = getCatalogSuggestions(plainTextItem);
   const parsedRecommendation = 'error' in parsedPlainText ? null : parsedPlainText;
 
-  async function handleQuickAdd(foodName: string) {
+  function setDateSelection(dateKey: string, shouldFollowToday = dateKey === todayKey) {
+    setSelectedDate(dateKey);
+    setFollowToday(shouldFollowToday);
+    setEditingLogId(null);
+    setEditDraft(null);
+  }
+
+  function beginEdit(log: DailyLogEntry) {
+    setEditingLogId(log.id);
+    setEditDraft({
+      label: getFoodName(log),
+      calories: String(log.food?.calories ?? log.custom_calories ?? 0),
+      timestamp: formatDateTimeInputValue(log.timestamp),
+    });
+    setNotice(null);
+  }
+
+  function cancelEdit() {
+    setEditingLogId(null);
+    setEditDraft(null);
+  }
+
+  async function saveEditedLog(logId: number) {
+    if (!editDraft) {
+      return;
+    }
+
+    const trimmedLabel = editDraft.label.trim();
+    const parsedCalories = Number(editDraft.calories);
+    const parsedTimestamp = new Date(editDraft.timestamp);
+
+    if (!trimmedLabel) {
+      setNotice('Add a food name before saving the edit.');
+      return;
+    }
+
+    if (!Number.isFinite(parsedCalories) || parsedCalories <= 0) {
+      setNotice('Calories must be a positive number.');
+      return;
+    }
+
+    if (Number.isNaN(parsedTimestamp.getTime())) {
+      setNotice('Pick a valid date and time for the log.');
+      return;
+    }
+
+    setPendingLabel(`edit-${logId}`);
+    setNotice(null);
+
     if (!canPersist) {
-      const optimistic = createFoodLog(foodName);
+      setLogs((current) =>
+        current.map((log) =>
+          log.id === logId
+            ? {
+                ...log,
+                food_id: null,
+                food: null,
+                custom_name: trimmedLabel,
+                custom_calories: Math.round(parsedCalories),
+                timestamp: parsedTimestamp.toISOString(),
+              }
+            : log,
+        ),
+      );
+      cancelEdit();
+      setNotice('Log updated locally. Add Supabase env vars to sync it.');
+      setPendingLabel(null);
+      return;
+    }
+
+    const result = await updateLog(logId, trimmedLabel, parsedCalories, parsedTimestamp.toISOString());
+
+    if (result.ok) {
+      setLogs((current) =>
+        current
+          .map((log) => (log.id === logId ? result.data : log))
+          .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime()),
+      );
+      cancelEdit();
+      setNotice('Log updated.');
+    } else {
+      setNotice(result.error);
+    }
+
+    setPendingLabel(null);
+  }
+
+  async function handleQuickAdd(foodName: string) {
+    const timestamp = buildTimestampForSelectedDate(selectedDate);
+
+    if (!canPersist) {
+      const optimistic = createFoodLog(foodName, timestamp);
 
       if (optimistic) {
         setLogs((current) => [optimistic, ...current]);
@@ -507,7 +679,7 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
     setPendingLabel(foodName);
     setNotice(null);
 
-    const result = await addFoodLog(foodName);
+    const result = await addFoodLog(foodName, timestamp);
 
     if (result.ok) {
       setLogs((current) => [result.data, ...current]);
@@ -528,6 +700,9 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
 
     if (!canPersist) {
       setLogs((current) => current.filter((log) => log.id !== logId));
+      if (editingLogId === logId) {
+        cancelEdit();
+      }
       setNotice(`${getFoodName(existing)} removed.`);
       return;
     }
@@ -539,6 +714,9 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
 
     if (result.ok) {
       setLogs((current) => current.filter((log) => log.id !== logId));
+      if (editingLogId === logId) {
+        cancelEdit();
+      }
       setNotice(`${getFoodName(existing)} removed.`);
     } else {
       setNotice(result.error);
@@ -566,7 +744,7 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
     }
 
     if (!canPersist) {
-      setLogs((current) => [createCustomLog(parsed.itemName, parsed.calories), ...current]);
+      setLogs((current) => [createCustomLog(parsed.itemName, parsed.calories, buildTimestampForSelectedDate(selectedDate)), ...current]);
       setPlainTextItem('');
       setPlainTextCalories('');
       setNotice('One-off item saved locally. Add Supabase env vars to sync it.');
@@ -576,7 +754,7 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
     setPendingLabel('custom');
     setNotice(null);
 
-    const result = await addCustomLog(parsed.itemName, parsed.calories);
+    const result = await addCustomLog(parsed.itemName, parsed.calories, buildTimestampForSelectedDate(selectedDate));
 
     if (result.ok) {
       setLogs((current) => [result.data, ...current]);
@@ -589,6 +767,8 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
 
     setPendingLabel(null);
   }
+
+  const selectedDayLabel = selectedDate === todayKey ? "Today's log" : `${formatDateKeyLabel(selectedDate)} log`;
 
   return (
     <div className="mx-auto flex min-h-screen w-full flex-col gap-5">
@@ -882,48 +1062,146 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
           </section>
 
           <section className="rounded-[2rem] border border-white/10 bg-white/5 p-4 shadow-soft backdrop-blur-xl sm:p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-[family-name:var(--font-space-grotesk)] text-xl font-semibold text-white">Day log</h2>
+                <p className="mt-1 text-sm text-slate-400">View, add, or edit entries for any stored date.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(event) => setDateSelection(event.target.value || todayKey, event.target.value === todayKey)}
+                  className="rounded-full border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none transition focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => setDateSelection(todayKey, true)}
+                  className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-300 transition hover:border-cyan-400/30 hover:bg-white/10 hover:text-white"
+                >
+                  Today
+                </button>
+              </div>
+            </div>
+
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-300">
+              <span>{selectedDayLabel}</span>
+              <span>{selectedDayLogs.length} entries</span>
+            </div>
+
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="font-[family-name:var(--font-space-grotesk)] text-xl font-semibold text-white">Today&apos;s log</h2>
+              <h3 className="font-[family-name:var(--font-space-grotesk)] text-lg font-semibold text-white">
+                {selectedDate === todayKey ? 'Today' : formatDateKeyLabel(selectedDate)} summary
+              </h3>
               <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
-                {logs.length} entries
+                {selectedDayLogs.length} entries
               </span>
             </div>
 
-            {logs.length > 0 ? (
+            {selectedDayLogs.length > 0 ? (
               <div className="space-y-2">
-                {logs.slice(0, 10).map((log) => {
+                {selectedDayLogs.map((log) => {
                   const label = getFoodName(log);
                   const calories = log.food?.calories ?? log.custom_calories ?? 0;
+                  const isEditing = editingLogId === log.id;
 
                   return (
                     <article key={log.id} className="rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="truncate font-medium text-white">{label}</div>
-                          <div className="mt-1 text-sm text-slate-400">{log.food?.default_portion ?? 'Manual calorie entry'}</div>
-                          <div className="mt-2 text-xs text-slate-500">{formatTime(log.timestamp)}</div>
-                        </div>
-                        <div className="flex shrink-0 flex-col items-end gap-2">
-                          <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-sm font-semibold text-cyan-100">
-                            {formatCalories(calories)} kcal
+                      {isEditing && editDraft ? (
+                        <div className="space-y-3">
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <label className="block space-y-2 md:col-span-2">
+                              <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">Food name</span>
+                              <input
+                                value={editDraft.label}
+                                onChange={(event) => setEditDraft((current) => (current ? { ...current, label: event.target.value } : current))}
+                                className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20"
+                              />
+                            </label>
+
+                            <label className="block space-y-2">
+                              <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">Calories</span>
+                              <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                value={editDraft.calories}
+                                onChange={(event) => setEditDraft((current) => (current ? { ...current, calories: event.target.value } : current))}
+                                className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20"
+                              />
+                            </label>
+
+                            <label className="block space-y-2">
+                              <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">Date and time</span>
+                              <input
+                                type="datetime-local"
+                                value={editDraft.timestamp}
+                                onChange={(event) => setEditDraft((current) => (current ? { ...current, timestamp: event.target.value } : current))}
+                                className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20"
+                              />
+                            </label>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(log.id)}
-                            disabled={pendingLabel === `delete-${log.id}`}
-                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300 transition hover:border-rose-400/30 hover:bg-rose-400/10 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {pendingLabel === `delete-${log.id}` ? 'Removing...' : 'Delete'}
-                          </button>
+
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="text-xs text-slate-500">Exact catalog matches stay catalog-backed; any other edit becomes a custom entry.</div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={cancelEdit}
+                                className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => saveEditedLog(log.id)}
+                                disabled={pendingLabel === `edit-${log.id}`}
+                                className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {pendingLabel === `edit-${log.id}` ? 'Saving...' : 'Save'}
+                              </button>
+                            </div>
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <div className="truncate font-medium text-white">{label}</div>
+                            <div className="mt-1 text-sm text-slate-400">{log.food?.default_portion ?? 'Manual calorie entry'}</div>
+                            <div className="mt-2 text-xs text-slate-500">{formatTime(log.timestamp)}</div>
+                          </div>
+                          <div className="flex shrink-0 flex-col items-end gap-2">
+                            <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-sm font-semibold text-cyan-100">
+                              {formatCalories(calories)} kcal
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => beginEdit(log)}
+                                disabled={Boolean(pendingLabel)}
+                                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300 transition hover:border-cyan-400/30 hover:bg-cyan-400/10 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(log.id)}
+                                disabled={pendingLabel === `delete-${log.id}`}
+                                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300 transition hover:border-rose-400/30 hover:bg-rose-400/10 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {pendingLabel === `delete-${log.id}` ? 'Removing...' : 'Delete'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </article>
                   );
                 })}
               </div>
             ) : (
               <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/60 px-4 py-10 text-center text-sm text-slate-400">
-                No entries yet. Start with the selected time block.
+                No entries yet for this date. Add one from the quick-add cards or switch to another day.
               </div>
             )}
           </section>

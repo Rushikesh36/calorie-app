@@ -20,10 +20,51 @@ function failure(message: string): ActionResult<never> {
   return { ok: false, error: message };
 }
 
+function revalidateLogs() {
+  revalidatePath('/');
+  revalidatePath('/status');
+}
+
+function buildLogPayload(options: {
+  label: string;
+  calories: number;
+  timestamp?: string;
+}) {
+  const trimmedLabel = options.label.trim();
+
+  if (!trimmedLabel) {
+    return null;
+  }
+
+  const roundedCalories = Math.round(options.calories);
+  const catalogFood = mealCatalogByName[trimmedLabel];
+
+  if (catalogFood && catalogFood.calories === roundedCalories) {
+    return {
+      food_id: catalogFood.id,
+      custom_name: null,
+      custom_calories: null,
+      timestamp: options.timestamp ?? new Date().toISOString(),
+    };
+  }
+
+  if (!Number.isFinite(roundedCalories) || roundedCalories <= 0) {
+    return null;
+  }
+
+  return {
+    food_id: null,
+    custom_name: trimmedLabel,
+    custom_calories: roundedCalories,
+    timestamp: options.timestamp ?? new Date().toISOString(),
+  };
+}
+
 async function insertLogRow(payload: {
   food_id: number | null;
   custom_name: string | null;
   custom_calories: number | null;
+  timestamp?: string;
 }): Promise<ActionResult<DailyLogEntry>> {
   const supabase = getSupabaseClient();
 
@@ -41,7 +82,7 @@ async function insertLogRow(payload: {
     return failure(error?.message ?? 'Failed to record the calorie entry.');
   }
 
-  revalidatePath('/');
+  revalidateLogs();
 
   return {
     ok: true,
@@ -92,7 +133,7 @@ export async function getLogsInRange(options?: {
   return data.map(normalizeLogRow);
 }
 
-export async function addFoodLog(foodName: string): Promise<ActionResult<DailyLogEntry>> {
+export async function addFoodLog(foodName: string, timestamp?: string): Promise<ActionResult<DailyLogEntry>> {
   const trimmedName = foodName.trim();
   const food = mealCatalogByName[trimmedName];
 
@@ -106,14 +147,20 @@ export async function addFoodLog(foodName: string): Promise<ActionResult<DailyLo
     return failure('Connect NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable logging.');
   }
 
-  return insertLogRow({
-    food_id: null,
-    custom_name: food.name,
-    custom_calories: food.calories,
+  const payload = buildLogPayload({
+    label: food.name,
+    calories: food.calories,
+    timestamp,
   });
+
+  if (!payload) {
+    return failure('Choose a food before logging it.');
+  }
+
+  return insertLogRow(payload);
 }
 
-export async function addCustomLog(customName: string, customCalories: number): Promise<ActionResult<DailyLogEntry>> {
+export async function addCustomLog(customName: string, customCalories: number, timestamp?: string): Promise<ActionResult<DailyLogEntry>> {
   const trimmedName = customName.trim();
 
   if (!trimmedName) {
@@ -124,11 +171,64 @@ export async function addCustomLog(customName: string, customCalories: number): 
     return failure('Calories must be a positive number.');
   }
 
-  return insertLogRow({
-    food_id: null,
-    custom_name: trimmedName,
-    custom_calories: Math.round(customCalories),
+  const payload = buildLogPayload({
+    label: trimmedName,
+    calories: customCalories,
+    timestamp,
   });
+
+  if (!payload) {
+    return failure('Calories must be a positive number.');
+  }
+
+  return insertLogRow(payload);
+}
+
+export async function updateLog(
+  logId: number,
+  label: string,
+  calories: number,
+  timestamp: string,
+): Promise<ActionResult<DailyLogEntry>> {
+  const supabase = getSupabaseClient();
+
+  if (!supabase) {
+    return failure('Connect NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable updating entries.');
+  }
+
+  const resolvedTimestamp = new Date(timestamp);
+
+  if (Number.isNaN(resolvedTimestamp.getTime())) {
+    return failure('Pick a valid date and time for the entry.');
+  }
+
+  const payload = buildLogPayload({
+    label,
+    calories,
+    timestamp: resolvedTimestamp.toISOString(),
+  });
+
+  if (!payload) {
+    return failure('Enter a valid food name and positive calories.');
+  }
+
+  const { data, error } = await supabase
+    .from('daily_logs')
+    .update(payload)
+    .eq('id', logId)
+    .select('id, food_id, custom_name, custom_calories, timestamp')
+    .single();
+
+  if (error || !data) {
+    return failure(error?.message ?? 'Failed to update the calorie entry.');
+  }
+
+  revalidateLogs();
+
+  return {
+    ok: true,
+    data: normalizeLogRow(data),
+  };
 }
 
 export async function deleteLog(logId: number): Promise<ActionResult<null>> {
@@ -144,7 +244,7 @@ export async function deleteLog(logId: number): Promise<ActionResult<null>> {
     return failure(error.message ?? 'Failed to delete the log entry.');
   }
 
-  revalidatePath('/');
+  revalidateLogs();
 
   return { ok: true, data: null };
 }

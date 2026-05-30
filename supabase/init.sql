@@ -64,6 +64,16 @@ begin
       for delete
       using (true);
   end if;
+
+  if not exists (
+    select 1 from pg_policies where schemaname = 'public' and tablename = 'daily_logs' and policyname = 'Public update logs'
+  ) then
+    create policy "Public update logs"
+      on daily_logs
+      for update
+      using (true)
+      with check (true);
+  end if;
 end
 $$;
 
