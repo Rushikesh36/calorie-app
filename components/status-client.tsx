@@ -111,7 +111,7 @@ export default function StatusClient({ logs, rangeLabel, windowDates = null }: P
         })}
       </div>
 
-      <div className="mt-6 grid grid-cols-2 gap-4">
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-4">
           <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Total calories</div>
           <div className="mt-2 text-3xl font-semibold text-white">{formatCalories(totalCalories)}</div>

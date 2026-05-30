@@ -2,6 +2,9 @@ export type FoodItem = {
   id: number;
   name: string;
   calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
   default_portion: string;
   category: string;
 };

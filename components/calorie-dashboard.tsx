@@ -106,6 +106,10 @@ function formatCalories(value: number) {
   return new Intl.NumberFormat('en-US').format(value);
 }
 
+function formatMacro(value: number) {
+  return `${formatCalories(value)}g`;
+}
+
 function getTimeOfDayBucket(key: TimeOfDayKey) {
   return timeOfDayBuckets.find((bucket) => bucket.key === key) ?? timeOfDayBuckets[0];
 }
@@ -558,6 +562,22 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
       }, 0),
     [selectedDayLogs],
   );
+  const totalMacros = useMemo(
+    () =>
+      selectedDayLogs.reduce(
+        (totals, log) => {
+          if (log.food) {
+            totals.protein += log.food.protein_g;
+            totals.carbs += log.food.carbs_g;
+            totals.fat += log.food.fat_g;
+          }
+
+          return totals;
+        },
+        { protein: 0, carbs: 0, fat: 0 },
+      ),
+    [selectedDayLogs],
+  );
 
   const progress = Math.min((totalCalories / dailyCalorieTarget.maximum) * 100, 100);
   const inRange = totalCalories >= dailyCalorieTarget.minimum && totalCalories <= dailyCalorieTarget.maximum;
@@ -813,6 +833,23 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
                 {remainingToCeiling > 0 ? `${formatCalories(remainingToCeiling)} left to ceiling` : 'Ceiling reached'}
               </span>
             </div>
+            <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Macros</div>
+              <div className="mt-2 grid grid-cols-3 gap-2 text-sm sm:text-base">
+                <div>
+                  <div className="text-slate-400">Protein</div>
+                  <div className="font-semibold text-white">{formatMacro(totalMacros.protein)}</div>
+                </div>
+                <div>
+                  <div className="text-slate-400">Carbs</div>
+                  <div className="font-semibold text-white">{formatMacro(totalMacros.carbs)}</div>
+                </div>
+                <div>
+                  <div className="text-slate-400">Fat</div>
+                  <div className="font-semibold text-white">{formatMacro(totalMacros.fat)}</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -826,11 +863,11 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
       <section className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
         <div className="space-y-5">
           <section className="rounded-[2rem] border border-white/10 bg-white/5 p-4 shadow-soft backdrop-blur-xl sm:p-5">
-              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div>
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
                 <h2 className="font-[family-name:var(--font-space-grotesk)] text-xl font-semibold text-white">Choose time of day</h2>
               </div>
-              <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
+                <div className="w-fit rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
                 Auto: {getTimeOfDayBucket(getAutoTimeOfDay()).label}
               </div>
             </div>
@@ -866,11 +903,11 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
           </section>
 
           <section className="rounded-[2rem] border border-white/10 bg-white/5 p-4 shadow-soft backdrop-blur-xl sm:p-5">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
                 <h2 className="font-[family-name:var(--font-space-grotesk)] text-xl font-semibold text-white">Recommended next</h2>
               </div>
-              <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
+              <div className="w-fit rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
                 {remainingToCeiling > 0 ? `${formatCalories(remainingToCeiling)} left` : 'Budget met'}
               </div>
             </div>
@@ -1084,16 +1121,16 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
               </div>
             </div>
 
-            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-300">
-              <span>{selectedDayLabel}</span>
-              <span>{selectedDayLogs.length} entries</span>
+            <div className="mb-4 flex flex-col gap-2 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+              <span className="min-w-0">{selectedDayLabel}</span>
+              <span className="w-fit">{selectedDayLogs.length} entries</span>
             </div>
 
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h3 className="font-[family-name:var(--font-space-grotesk)] text-lg font-semibold text-white">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h3 className="min-w-0 font-[family-name:var(--font-space-grotesk)] text-lg font-semibold text-white">
                 {selectedDate === todayKey ? 'Today' : formatDateKeyLabel(selectedDate)} summary
               </h3>
-              <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
+              <span className="w-fit rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
                 {selectedDayLogs.length} entries
               </span>
             </div>
@@ -1174,7 +1211,7 @@ export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardPr
                             <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-sm font-semibold text-cyan-100">
                               {formatCalories(calories)} kcal
                             </div>
-                            <div className="flex gap-2">
+                            <div className="flex flex-wrap justify-end gap-2">
                               <button
                                 type="button"
                                 onClick={() => beginEdit(log)}
