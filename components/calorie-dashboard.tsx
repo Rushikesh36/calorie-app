@@ -317,6 +317,11 @@ export function CalorieDashboard({
     try {
       const logCount = selectedDayLogs.length;
       const res = await syncDayWithGemini(selectedDate, timeOfDay);
+      if (res.error) {
+        setSyncError(res.error);
+        setSyncMessage(null);
+        return;
+      }
       setLogs((current) => {
         const other = current.filter((l) => getLogDateKey(l) !== selectedDate);
         return [...(res.logs || []), ...other];

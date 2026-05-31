@@ -441,9 +441,11 @@ export async function addResolvedLog(args: {
   return mapRowToDailyLog(data);
 }
 
-export async function syncDayWithGemini(date: string, timeOfDay?: string): Promise<{ logs: DailyLog[]; insight: DailyInsight | null }> {
+export async function syncDayWithGemini(date: string, timeOfDay?: string): Promise<{ logs: DailyLog[]; insight: DailyInsight | null; error?: string }> {
   const supabase = getSupabaseClient();
-  if (!supabase) throw new Error('Supabase credentials are not configured');
+  if (!supabase) {
+    return { logs: await getLogsForDate(date), insight: await getInsightForDate(date), error: 'Supabase credentials are not configured' };
+  }
 
   // 1. fetch logs for date
   const logs = await getLogsForDate(date);
@@ -526,14 +528,22 @@ Respond ONLY with a valid JSON object and nothing else — no markdown, no backt
     parsed = parseGeminiJson(raw);
   } catch (error) {
     console.error('syncDayWithGemini failed to parse Gemini output', { error, date, timeOfDay });
-    throw new Error('Gemini returned an unreadable response for sync');
+    return {
+      logs: await getLogsForDate(date),
+      insight: await getInsightForDate(date),
+      error: 'Gemini returned an unreadable response for sync',
+    };
   }
 
   // 6. For each resolved pending item, upsert foods and update daily_logs
   const resolvedItems: any[] = parsed.resolved_items || [];
 
   if (pending.length > 0 && resolvedItems.length === 0) {
-    throw new Error('Gemini did not resolve any pending items');
+    return {
+      logs: await getLogsForDate(date),
+      insight: await getInsightForDate(date),
+      error: 'Gemini did not resolve any pending items',
+    };
   }
 
   for (const item of resolvedItems) {
