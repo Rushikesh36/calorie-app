@@ -146,12 +146,12 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
     const latestDate = n > 0 ? new Date(sortedAscending[n - 1].measured_at) : new Date();
     const firstDate = n > 0 ? new Date(sortedAscending[0].measured_at) : latestDate;
 
-    // benchmark: a line with slope -2 kg per week (2 kg loss per 7 days) referenced to the latest weight/date
+    // benchmark: a line with slope -2 kg per month referenced to the latest weight/date
     const benchmarkValues = sortedAscending.map((entry) => {
       const d = new Date(entry.measured_at);
       const daysFromLatest = (d.getTime() - latestDate.getTime()) / (1000 * 60 * 60 * 24);
-      const weeksFromLatest = daysFromLatest / 7;
-      return latestWeight - 2 * weeksFromLatest;
+      const monthsFromLatest = daysFromLatest / 30;
+      return latestWeight - 2 * monthsFromLatest;
     });
 
     // ideal path: a steady -2 kg/week line starting from the first entry
@@ -340,7 +340,7 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
           </div>
           <div className="grid grid-cols-3 gap-2 text-xs sm:text-sm">
             <div className="rounded-2xl border border-rose-200/15 bg-rose-100/10 px-3 py-2 text-rose-100">Red: your weight</div>
-            <div className="rounded-2xl border border-cyan-200/15 bg-cyan-100/10 px-3 py-2 text-cyan-100">Blue: benchmark -2kg</div>
+            <div className="rounded-2xl border border-cyan-200/15 bg-cyan-100/10 px-3 py-2 text-cyan-100">Blue: benchmark -2kg/month</div>
             <div className="rounded-2xl border border-emerald-200/15 bg-emerald-100/10 px-3 py-2 text-emerald-100">Green: ideal path</div>
           </div>
         </div>
@@ -395,7 +395,7 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
           </svg>
           <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
             <span>Latest: {weightChart.latestWeight ? formatWeight(weightChart.latestWeight) : '—'}</span>
-            <span>Benchmark rate: 2 kg/week</span>
+            <span>Benchmark rate: 2 kg/month</span>
             <span>{weightEntries.length} weight logs</span>
           </div>
         </div>
