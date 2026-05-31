@@ -2,14 +2,12 @@
 
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
 import { FiCheckCircle, FiClock, FiHeart } from 'react-icons/fi';
-import type { DailyLog, DailyInsight, FoodItem, TopPick } from "@/lib/types";
+import type { DailyLog, DailyInsight, TopPick } from "@/lib/types";
 import {
   getTopPicksForTimeSlot,
-  searchFoodsInDB,
   saveFoodToDB,
   updateFoodFavourite,
   addPendingLog,
-  addResolvedLog,
   deleteLog,
   syncDayWithGemini,
   getFavouriteFoodsByNames,
@@ -114,10 +112,8 @@ export function CalorieDashboard({
   const [insight, setInsight] = useState<DailyInsight | null>(initialInsight ?? null);
   const [selectedDate, setSelectedDate] = useState(() => initialSelectedDate);
   const [followToday, setFollowToday] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [foodTitle, setFoodTitle] = useState("");
   const [recipeInput, setRecipeInput] = useState("");
-  const [searchResults, setSearchResults] = useState<FoodItem[]>([]);
-  const [showDropdown, setShowDropdown] = useState(false);
   const [topPicks, setTopPicks] = useState<TopPick[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -175,21 +171,6 @@ export function CalorieDashboard({
     getTopPicksForTimeSlot(timeOfDay as any).then((p) => setTopPicks(p || []));
   }, [timeOfDay, selectedDate]);
 
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-
-    const id = setTimeout(async () => {
-      const res = await searchFoodsInDB(searchQuery);
-      setSearchResults(res || []);
-      setShowDropdown(true);
-    }, 400);
-
-    return () => clearTimeout(id);
-  }, [searchQuery]);
-
   const selectedDayLogs = useMemo(
     () => logs.filter((l) => new Date(l.logged_at).toLocaleDateString("en-CA") === selectedDate).sort((a, b) => Number(new Date(b.logged_at)) - Number(new Date(a.logged_at))),
     [logs, selectedDate],
@@ -218,66 +199,10 @@ export function CalorieDashboard({
 
   const pendingCount = selectedDayLogs.filter((l) => l.status === "pending").length;
 
-  async function handleSelectSearchResult(item: FoodItem) {
-    setShowDropdown(false);
-    // keep searchQuery available to parse quantity
-    const originalInput = searchQuery.trim();
-    setSearchQuery("");
-    setPendingKey(item.id);
-    const timestamp = buildTimestampForSlot(selectedDate, timeOfDay);
-
-    // try to parse quantity from original input (e.g. "3 boiled eggs")
-    const parsed = parseQuantityAndName(originalInput || item.name);
-    const quantity = parsed.quantity ?? undefined;
-    const recipeDetails = recipeInput.trim() || null;
-
-    if (!canPersist) {
-      const optimistic: DailyLog = {
-        id: `local-${Date.now()}`,
-        logged_at: timestamp,
-        meal_slot: timeOfDay,
-        raw_input: item.name,
-        quantity: quantity,
-        recipe_details: recipeDetails,
-        display_name: parsed.name || item.name,
-        food_id: item.id,
-        calories: item.calories,
-        protein: item.protein,
-        carbs: item.carbs,
-        fat: item.fat,
-        status: "resolved",
-      } as unknown as DailyLog;
-      setLogs((s) => [optimistic, ...s]);
-      setRecipeInput("");
-      setPendingKey(null);
-      return;
-    }
-
-    const added = await addResolvedLog({
-      food_id: item.id,
-      display_name: parsed.name || item.name,
-      timestamp,
-      meal_slot: timeOfDay,
-      quantity,
-      recipe_details: recipeDetails,
-    });
-    if (added) {
-      const normalized = { ...added, meal_slot: added.meal_slot ?? determineTimeSlot(new Date(added.logged_at)) } as DailyLog;
-      setLogs((s) => [normalized, ...s]);
-    } else {
-      console.error('Failed to add resolved log for', item);
-      try {
-        // eslint-disable-next-line no-alert
-        alert('Failed to add entry. Check server logs for details.');
-      } catch (e) {}
-    }
-    setRecipeInput("");
-    setPendingKey(null);
-  }
-
-  async function handleAddPending(display_name: string, recipeDetails?: string | null) {
-    setPendingKey(display_name);
-    const originalInput = display_name.trim();
+  async function handleAddPending(displayName: string, recipeDetails?: string | null) {
+    const originalInput = displayName.trim();
+    if (!originalInput) return;
+    setPendingKey(displayName);
     const parsed = parseQuantityAndName(originalInput);
     const quantity = parsed.quantity ?? undefined;
     const normalizedRecipeDetails = recipeDetails === undefined ? recipeInput.trim() || null : recipeDetails;
@@ -287,10 +212,10 @@ export function CalorieDashboard({
         id: `local-${Date.now()}`,
         logged_at: timestamp,
         meal_slot: timeOfDay,
-        raw_input: parsed.name ?? display_name,
+        raw_input: parsed.name ?? displayName,
         quantity: parsed.quantity ?? null,
         recipe_details: normalizedRecipeDetails,
-        display_name: parsed.name ?? display_name,
+        display_name: parsed.name ?? displayName,
         food_id: null,
         calories: null,
         protein: null,
@@ -304,8 +229,8 @@ export function CalorieDashboard({
       return;
     }
     const added = await addPendingLog({
-      raw_input: parsed.name ?? display_name,
-      display_name: parsed.name ?? display_name,
+      raw_input: parsed.name ?? displayName,
+      display_name: parsed.name ?? displayName,
       recipe_details: normalizedRecipeDetails,
       timestamp,
       meal_slot: timeOfDay,
@@ -315,7 +240,7 @@ export function CalorieDashboard({
       const normalized = { ...added, meal_slot: added.meal_slot ?? determineTimeSlot(new Date(added.logged_at)) } as DailyLog;
       setLogs((s) => [normalized, ...s]);
     } else {
-      console.error('Failed to add pending log for', display_name);
+        console.error('Failed to add pending log for', displayName);
       // show a simple alert so the user sees the failure in the browser
       try {
         // eslint-disable-next-line no-alert
@@ -326,6 +251,57 @@ export function CalorieDashboard({
     }
     setRecipeInput("");
     setPendingKey(null);
+  }
+
+  async function handleAddAndSync() {
+    const title = foodTitle.trim();
+    if (!title) return;
+
+    setSyncError(null);
+    setSyncMessage(null);
+    await handleAddPending(title, recipeInput.trim() || null);
+    setFoodTitle("");
+
+    if (!canPersist) return;
+
+    setIsSyncing(true);
+    try {
+      const res = await syncDayWithGemini(selectedDate, timeOfDay);
+      setLogs((current) => {
+        const other = current.filter((l) => new Date(l.logged_at).toLocaleDateString("en-CA") !== selectedDate);
+        return [...(res.logs || []), ...other];
+      });
+      setInsight(res.insight ?? null);
+      setSyncMessage('Saved and analysed with Gemini.');
+    } catch (err: any) {
+      console.error(err);
+      setSyncError(err?.message || 'Gemini sync failed. Check the server logs and configuration.');
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
+  async function handleQuickAddAndSync(title: string) {
+    setFoodTitle(title);
+    await handleAddPending(title, recipeInput.trim() || null);
+
+    if (!canPersist) return;
+
+    setIsSyncing(true);
+    try {
+      const res = await syncDayWithGemini(selectedDate, timeOfDay);
+      setLogs((current) => {
+        const other = current.filter((l) => new Date(l.logged_at).toLocaleDateString("en-CA") !== selectedDate);
+        return [...(res.logs || []), ...other];
+      });
+      setInsight(res.insight ?? null);
+      setSyncMessage('Saved and analysed with Gemini.');
+    } catch (err: any) {
+      console.error(err);
+      setSyncError(err?.message || 'Gemini sync failed. Check the server logs and configuration.');
+    } finally {
+      setIsSyncing(false);
+    }
   }
 
   function parseQuantityAndName(input: string): { quantity?: string | null; name: string } {
@@ -519,7 +495,7 @@ export function CalorieDashboard({
         </div>
         <div className="flex flex-wrap gap-2">
           {topPicks.map((p) => (
-            <button key={p.display_name} className={`${pastelChipClass} min-h-10`} onClick={() => handleAddPending(p.display_name)}>
+            <button key={p.display_name} className={`${pastelChipClass} min-h-10`} onClick={() => handleQuickAddAndSync(p.display_name)}>
               {p.display_name} +
             </button>
           ))}
@@ -530,27 +506,18 @@ export function CalorieDashboard({
         <form
           onSubmit={async (e: FormEvent) => {
             e.preventDefault();
-            if (!searchQuery.trim()) return;
-            if (searchResults.length === 1) {
-              await handleSelectSearchResult(searchResults[0]);
-            } else {
-              await handleAddPending(searchQuery.trim(), recipeInput.trim() || null);
-            }
-            setSearchQuery("");
-            setRecipeInput("");
-            setSearchResults([]);
+              await handleAddAndSync();
           }}
           className="flex flex-col gap-2"
         >
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
-              placeholder="Food title (shown in list), e.g. Boiled eggs"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Food title, e.g. Boiled eggs"
+                value={foodTitle}
+                onChange={(e) => setFoodTitle(e.target.value)}
               className={`w-full flex-1 ${surfaceInputClass}`}
-              onFocus={() => setShowDropdown(true)}
             />
-            <button className={`${pastelAddButtonClass} w-full sm:w-auto`}>Add</button>
+              <button className={`${pastelAddButtonClass} w-full sm:w-auto`} disabled={isSyncing || !foodTitle.trim()}>{isSyncing ? 'Saving…' : 'Add & Analyse'}</button>
           </div>
           <textarea
             placeholder="Optional recipe/ingredients with amounts, e.g. 3 eggs, 1 tsp ghee, 30g onion"
@@ -559,21 +526,6 @@ export function CalorieDashboard({
             className="min-h-20 w-full rounded-2xl border border-white/10 bg-white/8 px-4 py-3 text-white placeholder:text-slate-400 shadow-inner outline-none transition focus:border-cyan-200/40 focus:bg-white/12"
           />
         </form>
-
-        {showDropdown && searchResults.length > 0 && (
-          <div className="mt-2 rounded-2xl border border-sky-200/15 bg-slate-950/90 p-2 shadow-[0_12px_30px_rgba(0,0,0,0.25)]">
-            {searchResults.map((r) => (
-              <div key={r.id} className="flex flex-col gap-2 rounded-xl px-3 py-2 transition hover:bg-white/5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="break-words text-slate-100">
-                  {r.name} — {Math.round(r.calories)} kcal
-                </div>
-                <button className="rounded-full border border-sky-200/20 bg-sky-100/10 px-3 py-1 text-sky-50 transition hover:bg-sky-100/20 sm:ml-2" onClick={() => handleSelectSearchResult(r)}>
-                  Add
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
       </section>
 
       <section className="mt-6">
