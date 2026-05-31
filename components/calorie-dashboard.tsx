@@ -19,6 +19,9 @@ type Props = {
   initialLogs: DailyLog[];
   initialInsight?: DailyInsight | null;
   canPersist: boolean;
+  initialSelectedDate: string;
+  initialTimeOfDay: string;
+  initialTodayKey: string;
 };
 
 function getLocalDateKey(date: Date) {
@@ -26,7 +29,7 @@ function getLocalDateKey(date: Date) {
 }
 
 function formatDateKeyLabel(dateKey: string) {
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${dateKey}T12:00:00`));
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(`${dateKey}T12:00:00`));
 }
 
 function determineTimeSlot(date: Date) {
@@ -93,7 +96,14 @@ const pastelHeartButtonClass =
 const mealTagClass =
   'inline-flex items-center rounded-full border border-sky-200/15 bg-sky-100/10 px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-sky-50';
 
-export function CalorieDashboard({ initialLogs, initialInsight = null, canPersist }: Props) {
+export function CalorieDashboard({
+  initialLogs,
+  initialInsight = null,
+  canPersist,
+  initialSelectedDate,
+  initialTimeOfDay,
+  initialTodayKey,
+}: Props) {
   const [logs, setLogs] = useState<DailyLog[]>(() => {
     const arr = (initialLogs ?? []).map((l) => ({
       ...l,
@@ -102,7 +112,7 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
     return arr;
   });
   const [insight, setInsight] = useState<DailyInsight | null>(initialInsight ?? null);
-  const [selectedDate, setSelectedDate] = useState(() => getLocalDateKey(new Date()));
+  const [selectedDate, setSelectedDate] = useState(() => initialSelectedDate);
   const [followToday, setFollowToday] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<FoodItem[]>([]);
@@ -110,9 +120,9 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
   const [topPicks, setTopPicks] = useState<TopPick[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
-  const [timeOfDay, setTimeOfDay] = useState(() => determineTimeSlot(new Date()));
+  const [timeOfDay, setTimeOfDay] = useState(() => initialTimeOfDay);
   const [heartedLogs, setHeartedLogs] = useState<Record<string, boolean>>({});
-  const todayKey = getLocalDateKey(new Date());
+  const todayKey = initialTodayKey;
 
   useEffect(() => {
     // Initialize hearted state from persisted `foods.is_favourite`
@@ -145,6 +155,8 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
   useEffect(() => {
     if (!followToday) return;
     const tick = () => setSelectedDate(getLocalDateKey(new Date()));
+    tick();
+    setTimeOfDay(determineTimeSlot(new Date()));
     const now = new Date();
     const next = new Date(now);
     next.setHours(24, 0, 0, 0);

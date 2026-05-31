@@ -473,9 +473,18 @@ Respond ONLY with a valid JSON object and nothing else — no markdown, no backt
 }`;
 
   // 4. call Gemini once
-  const raw = await callGemini(prompt);
-  const clean = raw.replace(/```json|```/gi, '').trim();
-  const parsed = JSON.parse(clean);
+  let parsed: any = null;
+
+  try {
+    const raw = await callGemini(prompt);
+    const clean = raw.replace(/```json|```/gi, '').trim();
+    parsed = JSON.parse(clean);
+  } catch (error) {
+    console.error('syncDayWithGemini failed to parse Gemini output', { error, date, timeOfDay });
+    const updatedLogs = await getLogsForDate(date);
+    const updatedInsight = await getInsightForDate(date);
+    return { logs: updatedLogs, insight: updatedInsight };
+  }
 
   // 6. For each resolved pending item, upsert foods and update daily_logs
   const resolvedItems: any[] = parsed.resolved_items || [];

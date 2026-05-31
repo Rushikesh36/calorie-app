@@ -26,7 +26,7 @@ function dayKeyLocal(isoDateString: string) {
 }
 
 function formatDayLabelLocal(date: Date) {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
 }
 
 function getCalories(log: DailyLog) {
@@ -463,7 +463,7 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <div className="text-lg font-semibold text-white">{formatWeight(entry.weight_kg)}</div>
-                        <div className="text-xs uppercase tracking-[0.18em] text-slate-500">{new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(entry.measured_at))}</div>
+                        <div className="text-xs uppercase tracking-[0.18em] text-slate-500">{new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(entry.measured_at))}</div>
                         {entry.note ? <div className="mt-2 text-sm text-slate-300">{entry.note}</div> : null}
                       </div>
                       <div className="flex flex-wrap gap-2">
