@@ -301,7 +301,7 @@ export function CalorieDashboard({
   async function handleSync() {
     setIsSyncing(true);
     setSyncError(null);
-    setSyncMessage(null);
+    setSyncMessage('Syncing with Gemini...');
     try {
       const logCount = selectedDayLogs.length;
       const res = await syncDayWithGemini(selectedDate, timeOfDay);
@@ -340,13 +340,18 @@ export function CalorieDashboard({
             }}
             className={surfaceInputClass}
           />
-          <button className={`${syncButtonClass} w-full sm:w-auto`} disabled={isSyncing} onClick={handleSync}>
+          <button type="button" className={`${syncButtonClass} w-full sm:w-auto`} disabled={isSyncing} onClick={handleSync}>
             {isSyncing ? "Syncing…" : "⚡ Sync & Analyse Day"}
           </button>
         </div>
-        <div aria-live="polite" className="min-h-5 text-sm text-slate-300 sm:text-right">
-          {syncMessage ? <span className="text-emerald-200">{syncMessage}</span> : null}
-          {syncError ? <span className="text-rose-200">{syncError}</span> : null}
+        <div aria-live="polite" className="min-h-5 sm:text-right">
+          {syncMessage || syncError ? (
+            <div className={`rounded-2xl border px-3 py-2 text-sm shadow-sm ${syncError ? 'border-rose-200/25 bg-rose-100/10 text-rose-100' : 'border-emerald-200/20 bg-emerald-100/10 text-emerald-100'}`}>
+              {syncError ? syncError : syncMessage}
+            </div>
+          ) : (
+            <div className="text-sm text-slate-400">Click sync to run Gemini analysis for the selected day.</div>
+          )}
         </div>
       </div>
 

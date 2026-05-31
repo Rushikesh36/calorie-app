@@ -431,7 +431,7 @@ export async function syncDayWithGemini(date: string, timeOfDay?: string): Promi
     : '(none)';
 
   const pendingBlock = pending.length
-    ? pending.map(l => `- title: "${l.display_name}" | raw_input: "${l.raw_input}"${l.quantity ? ` | quantity hint: "${l.quantity}"` : ''}${l.recipe_details ? ` | recipe_ingredients: "${l.recipe_details}"` : ''}`).join('\n')
+    ? pending.map(l => `- log_id: "${l.id}" | title: "${l.display_name}" | raw_input: "${l.raw_input}"${l.quantity ? ` | quantity hint: "${l.quantity}"` : ''}${l.recipe_details ? ` | recipe_ingredients: "${l.recipe_details}"` : ''}`).join('\n')
     : '(none)';
 
   const prompt = `You are a nutrition expert assistant. Given the food log below for ${date}${timeOfDay ? ` (${timeOfDay})` : ''}, do exactly two things:
@@ -442,6 +442,7 @@ export async function syncDayWithGemini(date: string, timeOfDay?: string): Promi
    If the user did not specify quantity, assume quantity = \"1 portion\" (or \"1 serving\" when it reads better).
    Correct obvious spelling mistakes in display_name (for example: \"besan chila\" → \"Besan chilla\").
   Keep display_name as a short food title only. Do not include full recipe or ingredient list in display_name.
+   Preserve the exact log_id from the prompt and echo it back as log_id for every resolved item.
     Do not use 0 calories or 0 macros for a recognized food item; infer realistic values from nutrition databases.
     The total calories/macros for each resolved item must equal the sum of its foods.
     If a meal time is provided, use it to improve portion inference and keep the response aligned with that meal window.
@@ -456,8 +457,10 @@ ${pendingBlock}
 
 Respond ONLY with a valid JSON object and nothing else — no markdown, no backticks, no explanation:
 {
+    "log_id": "pending log id from the prompt",
   "resolved_items": [
     {
+        "log_id": "same pending log id",
       "raw_input": "...",
       "display_name": "...",
       "quantity": "1 portion",
@@ -508,6 +511,7 @@ Respond ONLY with a valid JSON object and nothing else — no markdown, no backt
   const resolvedItems: any[] = parsed.resolved_items || [];
 
   for (const item of resolvedItems) {
+    const logId = typeof item.log_id === 'string' ? item.log_id : null;
     const normalizedDisplayName = item.display_name || item.raw_input || '';
     const normalizedQuantity = item.quantity || '1 portion';
     const derivedFromFoods = sumFoodMacros(item.foods || []);
@@ -520,8 +524,8 @@ Respond ONLY with a valid JSON object and nothing else — no markdown, no backt
     const finalCarbs = carbs && carbs > 0 ? carbs : derivedFromFoods.carbs;
     const finalFat = fat && fat > 0 ? fat : derivedFromFoods.fat;
 
-    // find the matching daily_log by raw_input or display_name
-    const match = pending.find(p => p.raw_input === item.raw_input || p.display_name === item.display_name);
+    // Prefer an exact row match from Gemini; fall back to text matching for older responses.
+    const match = logId ? pending.find(p => p.id === logId) : pending.find(p => p.raw_input === item.raw_input || p.display_name === item.display_name);
     if (!match) continue;
 
     const upd = {
