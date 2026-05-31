@@ -180,27 +180,17 @@ export async function getTopPicksForTimeSlot(timeSlot: TimeSlot): Promise<TopPic
   const start = new Date();
   start.setDate(start.getDate() - 7);
 
+  const slotAliases: Record<string, string> = {
+    dinner: 'evening',
+  };
+  const normalizedTimeSlot = slotAliases[timeSlot] ?? timeSlot;
+
   const { data, error } = await supabase
     .from('daily_logs')
-    .select('display_name, raw_input, logged_at, food_id')
+    .select('display_name, raw_input, logged_at, food_id, meal_slot')
     .gte('logged_at', start.toISOString());
 
   if (error || !data) return [];
-
-  function inSlot(dateStr: string) {
-    const d = new Date(dateStr);
-    const h = d.getHours();
-    switch (timeSlot) {
-      case 'morning':
-        return h >= 5 && h <= 10;
-      case 'afternoon':
-        return h >= 11 && h <= 14;
-      case 'evening':
-        return h >= 15 && h <= 20;
-      case 'night':
-        return h >= 22 || h <= 4;
-    }
-  }
 
   // fetch favourited foods to filter recommendations to durable favourites
   const { data: favFoods } = await supabase.from('foods').select('name').eq('is_favourite', true);
@@ -209,7 +199,9 @@ export async function getTopPicksForTimeSlot(timeSlot: TimeSlot): Promise<TopPic
   const counts: Record<string, { display_name: string; raw_input: string; count: number }> = {};
 
   for (const row of data) {
-    if (!inSlot(row.logged_at)) continue;
+    const rowSlot = slotAliases[String(row.meal_slot ?? '').toLowerCase()] ?? String(row.meal_slot ?? '').toLowerCase();
+    if (rowSlot !== normalizedTimeSlot) continue;
+
     const display = row.display_name ?? '';
     const isFav = row.food_id != null || favSet.has(String(display).toLowerCase());
     if (!isFav) continue; // skip non-favourited items
