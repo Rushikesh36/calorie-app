@@ -15,6 +15,13 @@ type Props = {
   windowDates?: string[] | null; // ISO date strings for window when provided
 };
 
+type ChartMargins = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+
 function formatCalories(value: number) {
   return new Intl.NumberFormat(undefined).format(value);
 }
@@ -35,6 +42,41 @@ function getCalories(log: DailyLog) {
 
 function formatWeight(value: number) {
   return `${value.toFixed(1)} kg`;
+}
+
+function formatChartWeight(value: number) {
+  const rounded = Math.round(value * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)} kg`;
+}
+
+function formatChartDate(date: Date) {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
+}
+
+function createTickValues(min: number, max: number, count: number) {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || count <= 0) return [];
+  if (count === 1 || min === max) return [min];
+
+  const step = (max - min) / (count - 1);
+  return Array.from({ length: count }, (_, index) => min + step * index);
+}
+
+function pickTickIndices(total: number, maxTicks: number) {
+  if (total <= 0) return [];
+  if (total === 1) return [0];
+  if (maxTicks <= 1) return [0, total - 1];
+
+  const step = Math.max(1, Math.floor((total - 1) / (maxTicks - 1)));
+  const indices: number[] = [];
+  for (let index = 0; index < total; index += step) {
+    indices.push(index);
+  }
+
+  if (indices[indices.length - 1] !== total - 1) {
+    indices.push(total - 1);
+  }
+
+  return [...new Set(indices)].slice(0, maxTicks);
 }
 
 function toLocalDateTimeValue(isoString: string) {
@@ -69,11 +111,33 @@ function buildLinePath(values: number[], width: number, height: number, padding 
     .join(' ');
 }
 
+function buildChartPath(values: number[], width: number, height: number, margins: ChartMargins, minValue: number, maxValue: number) {
+  if (values.length === 0) return '';
+
+  const plotWidth = width - margins.left - margins.right;
+  const plotHeight = height - margins.top - margins.bottom;
+  const range = Math.max(maxValue - minValue, 0.1);
+
+  return values
+    .map((value, index) => {
+      const x = margins.left + (values.length === 1 ? plotWidth / 2 : (index / (values.length - 1)) * plotWidth);
+      const y = margins.top + ((maxValue - value) / range) * plotHeight;
+      return `${index === 0 ? 'M' : 'L'}${x},${y}`;
+    })
+    .join(' ');
+}
+
+function buildPathFromPoints(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) return '';
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`).join(' ');
+}
+
 export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates = null }: Props) {
   const [weightEntries, setWeightEntries] = useState<WeightLog[]>([]);
   const [weightValue, setWeightValue] = useState('');
   const [weightNote, setWeightNote] = useState('');
   const [savingWeight, setSavingWeight] = useState(false);
+  const [zoom, setZoom] = useState(1);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingWeight, setEditingWeight] = useState('');
   const [editingNote, setEditingNote] = useState('');
@@ -143,10 +207,52 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
     const sortedAscending = [...weightEntries].sort((a, b) => Number(new Date(a.measured_at)) - Number(new Date(b.measured_at)));
     const n = sortedAscending.length;
     const latestWeight = sortedAscending[n - 1]?.weight_kg ?? 0;
-    const latestDate = n > 0 ? new Date(sortedAscending[n - 1].measured_at) : new Date();
-    const firstDate = n > 0 ? new Date(sortedAscending[0].measured_at) : latestDate;
+    const targetWeight = 80;
 
-    // benchmark: a line with slope -2 kg per month referenced to the latest weight/date
+    // Chart sizing
+    const chartWidth = Math.max(760, 760);
+    const chartHeight = 380;
+    const margins: ChartMargins = {
+      top: 24,
+      right: 28,
+      bottom: 78,
+      left: 72,
+    };
+
+    if (n === 0) {
+      return {
+        chartWidth,
+        chartHeight,
+        margins,
+        sortedAscending,
+        latestWeight,
+        benchmarkValues: [] as number[],
+        targetValues: [] as number[],
+        currentPath: '',
+        benchmarkPath: '',
+        targetPath: '',
+        currentPoints: [] as Array<{ x: number; y: number; value: number; label: string }>,
+        xTicks: [] as Array<{ x: number; label: string }> ,
+        yTicks: [] as number[],
+      };
+    }
+
+    // Determine visible window based on zoom. zoom=1 -> show all, zoom>1 -> show fewer recent points
+    const visibleCount = Math.max(1, Math.round(n / zoom));
+    const endIndex = n - 1;
+    const startIndex = Math.max(0, n - visibleCount);
+
+    const firstDate = new Date(sortedAscending[startIndex].measured_at);
+    const latestDate = new Date(sortedAscending[endIndex].measured_at);
+
+    // For single point, give a generous domain so lines have span
+    if (visibleCount === 1) {
+      firstDate.setDate(firstDate.getDate() - 30);
+      latestDate.setDate(latestDate.getDate() + 30);
+    }
+
+    const domainSpanMs = Math.max(latestDate.getTime() - firstDate.getTime(), 1);
+
     const benchmarkValues = sortedAscending.map((entry) => {
       const d = new Date(entry.measured_at);
       const daysFromLatest = (d.getTime() - latestDate.getTime()) / (1000 * 60 * 60 * 24);
@@ -154,48 +260,67 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
       return latestWeight - 2 * monthsFromLatest;
     });
 
-    // ideal path: a steady -2 kg/week line starting from the first entry
-    const idealValues = sortedAscending.map((entry) => {
-      const d = new Date(entry.measured_at);
-      const daysFromFirst = (d.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24);
-      const weeksFromFirst = daysFromFirst / 7;
-      const startWeight = sortedAscending[0].weight_kg;
-      return startWeight - 2 * weeksFromFirst;
+    const targetValues = sortedAscending.map(() => targetWeight);
+
+    // Value range and padding
+    const currentValues = sortedAscending.map((entry) => entry.weight_kg);
+    const allValues = [...currentValues, ...benchmarkValues, ...targetValues];
+    const minValue = Math.min(...allValues);
+    const maxValue = Math.max(...allValues);
+    const valuePadding = Math.max(1, (maxValue - minValue) * 0.18);
+    const chartMin = minValue - valuePadding;
+    const chartMax = maxValue + valuePadding;
+    const plotWidth = chartWidth - margins.left - margins.right;
+    const plotHeight = chartHeight - margins.top - margins.bottom;
+
+    const scaleX = (date: Date) => margins.left + ((date.getTime() - firstDate.getTime()) / domainSpanMs) * plotWidth;
+    const scaleY = (value: number) => margins.top + ((chartMax - value) / Math.max(chartMax - chartMin, 0.1)) * plotHeight;
+
+    // Points only for visible window
+    const currentPoints = sortedAscending.slice(startIndex, endIndex + 1).map((entry) => ({
+      x: scaleX(new Date(entry.measured_at)),
+      y: scaleY(entry.weight_kg),
+      value: entry.weight_kg,
+      label: formatChartDate(new Date(entry.measured_at)),
+    }));
+
+    // X ticks chosen within visible window
+    const visibleTotal = endIndex - startIndex + 1;
+    const xTickRelIndices = pickTickIndices(visibleTotal, 6);
+    const xTicks = xTickRelIndices.map((relIdx) => {
+      const idx = startIndex + relIdx;
+      return {
+        x: scaleX(new Date(sortedAscending[idx].measured_at)),
+        label: formatChartDate(new Date(sortedAscending[idx].measured_at)),
+      };
     });
 
-    const values = [
-      ...sortedAscending.map((entry) => entry.weight_kg),
-      ...idealValues,
-      ...benchmarkValues,
-    ];
+    const yTicks = createTickValues(chartMin, chartMax, 5);
 
-    const chartWidth = 640;
-    const chartHeight = 240;
-    const padding = 24;
-    const innerWidth = chartWidth - padding * 2;
-    const innerHeight = chartHeight - padding * 2;
-    const minValue = values.length > 0 ? Math.min(...values) : 0;
-    const maxValue = values.length > 0 ? Math.max(...values) : 1;
-    const span = Math.max(maxValue - minValue, 0.1);
-
-    const toPoint = (value: number, index: number, total: number) => {
-      const x = padding + (total === 1 ? innerWidth / 2 : (index / (total - 1)) * innerWidth);
-      const y = padding + ((maxValue - value) / span) * innerHeight;
-      return { x, y };
-    };
+    const currentPath = buildPathFromPoints(currentPoints);
+    const benchmarkPath = buildPathFromPoints([
+      { x: margins.left, y: scaleY(latestWeight - 2 * (((firstDate.getTime() - latestDate.getTime()) / (1000 * 60 * 60 * 24)) / 30)) },
+      { x: chartWidth - margins.right, y: scaleY(latestWeight - 2 * (((latestDate.getTime() - latestDate.getTime()) / (1000 * 60 * 60 * 24)) / 30)) },
+    ]);
+    const targetPath = buildPathFromPoints([
+      { x: margins.left, y: scaleY(targetWeight) },
+      { x: chartWidth - margins.right, y: scaleY(targetWeight) },
+    ]);
 
     return {
       chartWidth,
       chartHeight,
+      margins,
       sortedAscending,
       latestWeight,
       benchmarkValues,
-      actualPath: buildLinePath(sortedAscending.map((entry) => entry.weight_kg), chartWidth, chartHeight, padding),
-      benchmarkPath: buildLinePath(benchmarkValues, chartWidth, chartHeight, padding),
-      idealPath: buildLinePath(idealValues, chartWidth, chartHeight, padding),
-      actualPoints: sortedAscending.map((entry, index) => toPoint(entry.weight_kg, index, sortedAscending.length)),
-      benchmarkPoints: benchmarkValues.map((value, index) => toPoint(value, index, sortedAscending.length)),
-      idealPoints: idealValues.map((value, index) => toPoint(value, index, idealValues.length)),
+      targetValues,
+      currentPath,
+      benchmarkPath,
+      targetPath,
+      currentPoints,
+      xTicks,
+      yTicks,
     };
   }, [weightEntries]);
 
@@ -339,9 +464,9 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
             <p className="mt-1 text-sm text-slate-400">Each entry saves with today&apos;s timestamp, then updates the chart below.</p>
           </div>
           <div className="grid grid-cols-3 gap-2 text-xs sm:text-sm">
-            <div className="rounded-2xl border border-rose-200/15 bg-rose-100/10 px-3 py-2 text-rose-100">Red: your weight</div>
+            <div className="rounded-2xl border border-rose-200/15 bg-rose-100/10 px-3 py-2 text-rose-100">Red: current weight</div>
             <div className="rounded-2xl border border-cyan-200/15 bg-cyan-100/10 px-3 py-2 text-cyan-100">Blue: benchmark -2kg/month</div>
-            <div className="rounded-2xl border border-emerald-200/15 bg-emerald-100/10 px-3 py-2 text-emerald-100">Green: ideal path</div>
+            <div className="rounded-2xl border border-emerald-200/15 bg-emerald-100/10 px-3 py-2 text-emerald-100">Green: flat 80kg line</div>
           </div>
         </div>
 
@@ -379,20 +504,121 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
         </form>
 
         <div className="mt-6 overflow-hidden rounded-[1.5rem] border border-white/10 bg-slate-950/70 p-4">
-          <svg viewBox={`0 0 ${weightChart.chartWidth} ${weightChart.chartHeight}`} className="h-64 w-full">
-            <path d={weightChart.benchmarkPath} fill="none" stroke="rgba(96,165,250,0.9)" strokeWidth="3" strokeDasharray="8 8" />
-            <path d={weightChart.idealPath} fill="none" stroke="rgba(134,239,172,0.95)" strokeWidth="3" />
-            <path d={weightChart.actualPath} fill="none" stroke="rgba(248,113,113,0.95)" strokeWidth="4" />
-            {weightChart.benchmarkPoints.map((point, index) => (
-              <circle key={`benchmark-${index}`} cx={point.x} cy={point.y} r="3.5" fill="rgba(96,165,250,0.95)" />
-            ))}
-            {weightChart.idealPoints.map((point, index) => (
-              <circle key={`ideal-${index}`} cx={point.x} cy={point.y} r="3.5" fill="rgba(134,239,172,0.95)" />
-            ))}
-            {weightChart.actualPoints.map((point, index) => (
-              <circle key={`actual-${index}`} cx={point.x} cy={point.y} r="4.5" fill="rgba(248,113,113,0.98)" />
-            ))}
-          </svg>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-3">
+            <div>
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Chart controls</div>
+              <div className="mt-1 text-sm text-slate-300">Use zoom to inspect the timeline.</div>
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="text-xs uppercase tracking-[0.2em] text-slate-500" htmlFor="weight-chart-zoom">
+                Zoom
+              </label>
+              <input
+                id="weight-chart-zoom"
+                type="range"
+                min="1"
+                max="3"
+                step="0.1"
+                value={zoom}
+                onChange={(e) => setZoom(Number(e.target.value))}
+                className="w-40 accent-cyan-300"
+              />
+              <span className="min-w-12 text-sm text-slate-300">{zoom.toFixed(1)}x</span>
+            </div>
+          </div>
+
+          {weightChart.sortedAscending.length === 0 ? (
+            <div className="py-8 text-sm text-slate-400">Add at least one weight entry to see the chart.</div>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <svg
+                viewBox={`0 0 ${weightChart.chartWidth} ${weightChart.chartHeight}`}
+                className="block"
+                style={{ width: `${weightChart.chartWidth}px`, minWidth: `${weightChart.chartWidth}px`, height: `${weightChart.chartHeight}px` }}
+              >
+                <line
+                  x1={weightChart.margins.left}
+                  y1={weightChart.margins.top}
+                  x2={weightChart.margins.left}
+                  y2={weightChart.chartHeight - weightChart.margins.bottom}
+                  stroke="rgba(148,163,184,0.55)"
+                  strokeWidth="1.5"
+                />
+                <line
+                  x1={weightChart.margins.left}
+                  y1={weightChart.chartHeight - weightChart.margins.bottom}
+                  x2={weightChart.chartWidth - weightChart.margins.right}
+                  y2={weightChart.chartHeight - weightChart.margins.bottom}
+                  stroke="rgba(148,163,184,0.55)"
+                  strokeWidth="1.5"
+                />
+
+                {weightChart.yTicks.map((tick) => {
+                  const plotHeight = weightChart.chartHeight - weightChart.margins.top - weightChart.margins.bottom;
+                  const y = weightChart.margins.top + ((Math.max(...weightChart.yTicks) - tick) / Math.max(Math.max(...weightChart.yTicks) - Math.min(...weightChart.yTicks), 0.1)) * plotHeight;
+
+                  return (
+                    <g key={`y-${tick}`}>
+                      <line
+                        x1={weightChart.margins.left}
+                        y1={y}
+                        x2={weightChart.chartWidth - weightChart.margins.right}
+                        y2={y}
+                        stroke="rgba(148,163,184,0.16)"
+                        strokeDasharray="4 6"
+                      />
+                      <text x={weightChart.margins.left - 10} y={y + 4} textAnchor="end" className="fill-slate-400" style={{ fontSize: '11px' }}>
+                        {formatChartWeight(tick)}
+                      </text>
+                    </g>
+                  );
+                })}
+
+                {weightChart.xTicks.map((tick) => (
+                  <g key={tick.label}>
+                    <line
+                      x1={tick.x}
+                      y1={weightChart.chartHeight - weightChart.margins.bottom}
+                      x2={tick.x}
+                      y2={weightChart.chartHeight - weightChart.margins.bottom + 8}
+                      stroke="rgba(148,163,184,0.55)"
+                    />
+                    <text
+                      x={tick.x}
+                      y={weightChart.chartHeight - weightChart.margins.bottom + 24}
+                      textAnchor="middle"
+                      className="fill-slate-400"
+                      style={{ fontSize: '11px' }}
+                    >
+                      {tick.label}
+                    </text>
+                  </g>
+                ))}
+
+                <path d={weightChart.targetPath} fill="none" stroke="rgba(134,239,172,0.95)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                <path d={weightChart.benchmarkPath} fill="none" stroke="rgba(96,165,250,0.95)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="8 8" />
+                <path d={weightChart.currentPath} fill="none" stroke="rgba(248,113,113,0.98)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                {weightChart.currentPoints.map((point, index) => (
+                  <circle key={`current-${index}`} cx={point.x} cy={point.y} r="5" fill="rgba(248,113,113,0.98)" stroke="rgba(15,23,42,0.9)" strokeWidth="2" />
+                ))}
+
+                <text x={weightChart.chartWidth / 2} y={weightChart.chartHeight - 16} textAnchor="middle" className="fill-slate-400" style={{ fontSize: '12px' }}>
+                  Date, month, year
+                </text>
+                <text
+                  x={18}
+                  y={weightChart.chartHeight / 2}
+                  transform={`rotate(-90 18 ${weightChart.chartHeight / 2})`}
+                  textAnchor="middle"
+                  className="fill-slate-400"
+                  style={{ fontSize: '12px' }}
+                >
+                  Weight (kg)
+                </text>
+              </svg>
+            </div>
+          )}
+
           <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
             <span>Latest: {weightChart.latestWeight ? formatWeight(weightChart.latestWeight) : '—'}</span>
             <span>Benchmark rate: 2 kg/month</span>
