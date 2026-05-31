@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS daily_logs (
   meal_slot     TEXT,
   raw_input     TEXT NOT NULL,
   quantity      TEXT,
+  recipe_details TEXT,
   display_name  TEXT NOT NULL,
   food_id       UUID REFERENCES foods(id),
   calories      FLOAT,

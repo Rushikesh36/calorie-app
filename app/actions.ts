@@ -41,6 +41,7 @@ function mapRowToDailyLog(row: any): DailyLog {
     meal_slot: row.meal_slot ?? null,
     raw_input: row.raw_input,
     quantity: row.quantity ?? null,
+    recipe_details: row.recipe_details ?? null,
     display_name: row.display_name,
     food_id: row.food_id ?? null,
     calories: row.calories === null ? null : Number(row.calories),
@@ -290,13 +291,21 @@ export async function getFavouriteFoodsByNames(names: string[]): Promise<string[
   return data.map((r: any) => r.name as string);
 }
 
-export async function addPendingLog(payload: { raw_input: string; quantity?: string; display_name: string; timestamp?: string; meal_slot?: string }): Promise<DailyLog | null> {
+export async function addPendingLog(payload: {
+  raw_input: string;
+  quantity?: string;
+  display_name: string;
+  recipe_details?: string | null;
+  timestamp?: string;
+  meal_slot?: string;
+}): Promise<DailyLog | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
   const insert = {
     raw_input: payload.raw_input,
     quantity: payload.quantity ?? null,
+    recipe_details: payload.recipe_details ?? null,
     display_name: payload.display_name,
     meal_slot: payload.meal_slot ?? null,
     calories: null,
@@ -356,11 +365,18 @@ export async function updateLog(id: string, display_name: string, calories: numb
   return mapRowToDailyLog(data);
 }
 
-export async function addResolvedLog(args: { food_id: string; quantity?: string; display_name?: string; timestamp?: string; meal_slot?: string }): Promise<DailyLog | null> {
+export async function addResolvedLog(args: {
+  food_id: string;
+  quantity?: string;
+  recipe_details?: string | null;
+  display_name?: string;
+  timestamp?: string;
+  meal_slot?: string;
+}): Promise<DailyLog | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
-  const { food_id, quantity, display_name, timestamp, meal_slot } = args;
+  const { food_id, quantity, recipe_details, display_name, timestamp, meal_slot } = args;
 
   // fetch food nutrition to copy
   const { data: foodRow } = await supabase.from('foods').select('*').eq('id', food_id).single();
@@ -369,6 +385,7 @@ export async function addResolvedLog(args: { food_id: string; quantity?: string;
   const insert = {
     raw_input: display_name ?? foodRow.name,
     quantity: quantity ?? null,
+    recipe_details: recipe_details ?? null,
     display_name: display_name ?? foodRow.name,
     meal_slot: meal_slot ?? null,
     food_id: food_id,
@@ -414,7 +431,7 @@ export async function syncDayWithGemini(date: string, timeOfDay?: string): Promi
     : '(none)';
 
   const pendingBlock = pending.length
-    ? pending.map(l => `- raw_input: "${l.raw_input}"${l.quantity ? ` | quantity hint: "${l.quantity}"` : ''}`).join('\n')
+    ? pending.map(l => `- title: "${l.display_name}" | raw_input: "${l.raw_input}"${l.quantity ? ` | quantity hint: "${l.quantity}"` : ''}${l.recipe_details ? ` | recipe_ingredients: "${l.recipe_details}"` : ''}`).join('\n')
     : '(none)';
 
   const prompt = `You are a nutrition expert assistant. Given the food log below for ${date}${timeOfDay ? ` (${timeOfDay})` : ''}, do exactly two things:
@@ -424,6 +441,7 @@ export async function syncDayWithGemini(date: string, timeOfDay?: string): Promi
    so each food can be stored individually for future use. Include per-unit nutrition for each individual food.
    If the user did not specify quantity, assume quantity = \"1 portion\" (or \"1 serving\" when it reads better).
    Correct obvious spelling mistakes in display_name (for example: \"besan chila\" → \"Besan chilla\").
+  Keep display_name as a short food title only. Do not include full recipe or ingredient list in display_name.
     Do not use 0 calories or 0 macros for a recognized food item; infer realistic values from nutrition databases.
     The total calories/macros for each resolved item must equal the sum of its foods.
     If a meal time is provided, use it to improve portion inference and keep the response aligned with that meal window.
@@ -510,6 +528,7 @@ Respond ONLY with a valid JSON object and nothing else — no markdown, no backt
       raw_input: item.raw_input || match.raw_input,
       display_name: normalizedDisplayName,
       quantity: normalizedQuantity,
+      recipe_details: match.recipe_details ?? null,
       meal_slot: timeOfDay ?? match.meal_slot ?? null,
       calories: finalCalories,
       protein: finalProtein,

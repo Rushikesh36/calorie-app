@@ -115,6 +115,7 @@ export function CalorieDashboard({
   const [selectedDate, setSelectedDate] = useState(() => initialSelectedDate);
   const [followToday, setFollowToday] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [recipeInput, setRecipeInput] = useState("");
   const [searchResults, setSearchResults] = useState<FoodItem[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [topPicks, setTopPicks] = useState<TopPick[]>([]);
@@ -228,6 +229,7 @@ export function CalorieDashboard({
     // try to parse quantity from original input (e.g. "3 boiled eggs")
     const parsed = parseQuantityAndName(originalInput || item.name);
     const quantity = parsed.quantity ?? undefined;
+    const recipeDetails = recipeInput.trim() || null;
 
     if (!canPersist) {
       const optimistic: DailyLog = {
@@ -236,6 +238,7 @@ export function CalorieDashboard({
         meal_slot: timeOfDay,
         raw_input: item.name,
         quantity: quantity,
+        recipe_details: recipeDetails,
         display_name: parsed.name || item.name,
         food_id: item.id,
         calories: item.calories,
@@ -245,11 +248,19 @@ export function CalorieDashboard({
         status: "resolved",
       } as unknown as DailyLog;
       setLogs((s) => [optimistic, ...s]);
+      setRecipeInput("");
       setPendingKey(null);
       return;
     }
 
-    const added = await addResolvedLog({ food_id: item.id, display_name: parsed.name || item.name, timestamp, meal_slot: timeOfDay, quantity });
+    const added = await addResolvedLog({
+      food_id: item.id,
+      display_name: parsed.name || item.name,
+      timestamp,
+      meal_slot: timeOfDay,
+      quantity,
+      recipe_details: recipeDetails,
+    });
     if (added) {
       const normalized = { ...added, meal_slot: added.meal_slot ?? determineTimeSlot(new Date(added.logged_at)) } as DailyLog;
       setLogs((s) => [normalized, ...s]);
@@ -260,14 +271,16 @@ export function CalorieDashboard({
         alert('Failed to add entry. Check server logs for details.');
       } catch (e) {}
     }
+    setRecipeInput("");
     setPendingKey(null);
   }
 
-  async function handleAddPending(display_name: string) {
+  async function handleAddPending(display_name: string, recipeDetails?: string | null) {
     setPendingKey(display_name);
     const originalInput = display_name.trim();
     const parsed = parseQuantityAndName(originalInput);
     const quantity = parsed.quantity ?? undefined;
+    const normalizedRecipeDetails = recipeDetails === undefined ? recipeInput.trim() || null : recipeDetails;
     const timestamp = buildTimestampForSlot(selectedDate, timeOfDay);
     if (!canPersist) {
       const optimistic: DailyLog = {
@@ -276,6 +289,7 @@ export function CalorieDashboard({
         meal_slot: timeOfDay,
         raw_input: parsed.name ?? display_name,
         quantity: parsed.quantity ?? null,
+        recipe_details: normalizedRecipeDetails,
         display_name: parsed.name ?? display_name,
         food_id: null,
         calories: null,
@@ -285,10 +299,18 @@ export function CalorieDashboard({
         status: "pending",
       } as unknown as DailyLog;
       setLogs((s) => [optimistic, ...s]);
+      setRecipeInput("");
       setPendingKey(null);
       return;
     }
-    const added = await addPendingLog({ raw_input: parsed.name ?? display_name, display_name: parsed.name ?? display_name, timestamp, meal_slot: timeOfDay, quantity });
+    const added = await addPendingLog({
+      raw_input: parsed.name ?? display_name,
+      display_name: parsed.name ?? display_name,
+      recipe_details: normalizedRecipeDetails,
+      timestamp,
+      meal_slot: timeOfDay,
+      quantity,
+    });
     if (added) {
       const normalized = { ...added, meal_slot: added.meal_slot ?? determineTimeSlot(new Date(added.logged_at)) } as DailyLog;
       setLogs((s) => [normalized, ...s]);
@@ -302,6 +324,7 @@ export function CalorieDashboard({
         // ignore in non-browser contexts
       }
     }
+    setRecipeInput("");
     setPendingKey(null);
   }
 
@@ -511,21 +534,30 @@ export function CalorieDashboard({
             if (searchResults.length === 1) {
               await handleSelectSearchResult(searchResults[0]);
             } else {
-              await handleAddPending(searchQuery.trim());
+              await handleAddPending(searchQuery.trim(), recipeInput.trim() || null);
             }
             setSearchQuery("");
+            setRecipeInput("");
             setSearchResults([]);
           }}
-          className="flex flex-col gap-2 sm:flex-row"
+          className="flex flex-col gap-2"
         >
-          <input
-            placeholder="What did you eat? e.g. 3 boiled eggs and 2 egg whites"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className={`w-full flex-1 ${surfaceInputClass}`}
-            onFocus={() => setShowDropdown(true)}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              placeholder="Food title (shown in list), e.g. Boiled eggs"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className={`w-full flex-1 ${surfaceInputClass}`}
+              onFocus={() => setShowDropdown(true)}
+            />
+            <button className={`${pastelAddButtonClass} w-full sm:w-auto`}>Add</button>
+          </div>
+          <textarea
+            placeholder="Optional recipe/ingredients with amounts, e.g. 3 eggs, 1 tsp ghee, 30g onion"
+            value={recipeInput}
+            onChange={(e) => setRecipeInput(e.target.value)}
+            className="min-h-20 w-full rounded-2xl border border-white/10 bg-white/8 px-4 py-3 text-white placeholder:text-slate-400 shadow-inner outline-none transition focus:border-cyan-200/40 focus:bg-white/12"
           />
-          <button className={`${pastelAddButtonClass} w-full sm:w-auto`}>Add</button>
         </form>
 
         {showDropdown && searchResults.length > 0 && (

@@ -16,6 +16,7 @@ export interface DailyLog {
   meal_slot: string | null;
   raw_input: string;
   quantity: string | null;
+  recipe_details: string | null;
   display_name: string;
   food_id: string | null;
   calories: number | null;
