@@ -119,6 +119,8 @@ export function CalorieDashboard({
   const [showDropdown, setShowDropdown] = useState(false);
   const [topPicks, setTopPicks] = useState<TopPick[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [timeOfDay, setTimeOfDay] = useState(() => initialTimeOfDay);
   const [heartedLogs, setHeartedLogs] = useState<Record<string, boolean>>({});
@@ -350,6 +352,8 @@ export function CalorieDashboard({
 
   async function handleSync() {
     setIsSyncing(true);
+    setSyncError(null);
+    setSyncMessage(null);
     try {
       const res = await syncDayWithGemini(selectedDate, timeOfDay);
       setLogs((current) => {
@@ -357,8 +361,16 @@ export function CalorieDashboard({
         return [...(res.logs || []), ...other];
       });
       setInsight(res.insight ?? null);
+      const resolvedCount = (res.logs || []).filter((log) => log.status === 'resolved').length;
+      const pendingCount = (res.logs || []).filter((log) => log.status === 'pending').length;
+      setSyncMessage(
+        resolvedCount === 0 && pendingCount === 0
+          ? 'Sync finished, but there were no entries to analyse for that day.'
+          : `Synced ${resolvedCount + pendingCount} log${resolvedCount + pendingCount === 1 ? '' : 's'} for ${selectedDate}.`,
+      );
     } catch (err: any) {
       console.error(err);
+      setSyncError(err?.message || 'Sync failed. Check the server logs and Supabase/Gemini configuration.');
     } finally {
       setIsSyncing(false);
     }
@@ -384,6 +396,10 @@ export function CalorieDashboard({
           <button className={`${syncButtonClass} w-full sm:w-auto`} disabled={isSyncing || selectedDayLogs.length === 0} onClick={handleSync}>
             {isSyncing ? "Syncing…" : "⚡ Sync & Analyse Day"}
           </button>
+        </div>
+        <div aria-live="polite" className="min-h-5 text-sm text-slate-300 sm:text-right">
+          {syncMessage ? <span className="text-emerald-200">{syncMessage}</span> : null}
+          {syncError ? <span className="text-rose-200">{syncError}</span> : null}
         </div>
       </div>
 
