@@ -23,7 +23,15 @@ type Props = {
 };
 
 function getLocalDateKey(date: Date) {
-  return new Intl.DateTimeFormat("en-CA").format(date);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value ?? '0000';
+  const month = parts.find((part) => part.type === 'month')?.value ?? '00';
+  const day = parts.find((part) => part.type === 'day')?.value ?? '00';
+  return `${year}-${month}-${day}`;
 }
 
 function formatDateKeyLabel(dateKey: string) {
@@ -64,6 +72,10 @@ function labelTimeSlot(slot: string) {
 
 function getLogMealSlot(log: DailyLog) {
   return log.meal_slot ?? determineTimeSlot(new Date(log.logged_at));
+}
+
+function getLogDateKey(log: DailyLog) {
+  return getLocalDateKey(new Date(log.logged_at));
 }
 
 function formatMacro(value: number) {
@@ -172,7 +184,7 @@ export function CalorieDashboard({
   }, [timeOfDay, selectedDate]);
 
   const selectedDayLogs = useMemo(
-    () => logs.filter((l) => new Date(l.logged_at).toLocaleDateString("en-CA") === selectedDate).sort((a, b) => Number(new Date(b.logged_at)) - Number(new Date(a.logged_at))),
+    () => logs.filter((l) => getLogDateKey(l) === selectedDate).sort((a, b) => Number(new Date(b.logged_at)) - Number(new Date(a.logged_at))),
     [logs, selectedDate],
   );
 
@@ -306,7 +318,7 @@ export function CalorieDashboard({
       const logCount = selectedDayLogs.length;
       const res = await syncDayWithGemini(selectedDate, timeOfDay);
       setLogs((current) => {
-        const other = current.filter((l) => new Date(l.logged_at).toLocaleDateString("en-CA") !== selectedDate);
+        const other = current.filter((l) => getLogDateKey(l) !== selectedDate);
         return [...(res.logs || []), ...other];
       });
       setInsight(res.insight ?? null);

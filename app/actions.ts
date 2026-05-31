@@ -61,6 +61,27 @@ function mapRowToWeightLog(row: any): WeightLog {
   };
 }
 
+function parseGeminiJson(raw: string) {
+  const cleaned = raw.replace(/```json|```/gi, '').trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (firstError) {
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch (secondError) {
+        throw secondError;
+      }
+    }
+
+    throw firstError;
+  }
+}
+
 export async function getLogsForDate(date: string): Promise<DailyLog[]> {
   noStore();
   const supabase = getSupabaseClient();
@@ -502,17 +523,18 @@ Respond ONLY with a valid JSON object and nothing else — no markdown, no backt
 
   try {
     const raw = await callGemini(prompt);
-    const clean = raw.replace(/```json|```/gi, '').trim();
-    parsed = JSON.parse(clean);
+    parsed = parseGeminiJson(raw);
   } catch (error) {
     console.error('syncDayWithGemini failed to parse Gemini output', { error, date, timeOfDay });
-    const updatedLogs = await getLogsForDate(date);
-    const updatedInsight = await getInsightForDate(date);
-    return { logs: updatedLogs, insight: updatedInsight };
+    throw new Error('Gemini returned an unreadable response for sync');
   }
 
   // 6. For each resolved pending item, upsert foods and update daily_logs
   const resolvedItems: any[] = parsed.resolved_items || [];
+
+  if (pending.length > 0 && resolvedItems.length === 0) {
+    throw new Error('Gemini did not resolve any pending items');
+  }
 
   for (const item of resolvedItems) {
     const logId = typeof item.log_id === 'string' ? item.log_id : null;
