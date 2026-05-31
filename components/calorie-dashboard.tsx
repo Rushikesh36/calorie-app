@@ -376,8 +376,8 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
       </div>
 
       <section className="mt-4">
-        <div className="rounded-[1.5rem] border border-sky-200/25 bg-gradient-to-br from-sky-300/18 via-slate-950 to-slate-900 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] lg:hidden">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(186,230,253,0.16),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(167,243,208,0.12),transparent_28%)]" />
+        <div className="relative overflow-hidden rounded-[1.5rem] border border-sky-200/25 bg-gradient-to-br from-sky-300/18 via-slate-950 to-slate-900 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] lg:hidden">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(186,230,253,0.16),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(167,243,208,0.12),transparent_28%)]" />
           <div className="relative">
             <div className="flex items-start justify-between gap-4">
               <div>
