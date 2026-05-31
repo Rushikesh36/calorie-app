@@ -375,40 +375,77 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
         </div>
       </div>
 
-      <section className="mt-4 grid gap-3 lg:grid-cols-[1.05fr_0.95fr]">
-        <div className="relative overflow-hidden rounded-[1.5rem] border border-sky-200/25 bg-gradient-to-br from-sky-300/18 via-slate-950 to-slate-900 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+      <section className="mt-4">
+        <div className="rounded-[1.5rem] border border-sky-200/25 bg-gradient-to-br from-sky-300/18 via-slate-950 to-slate-900 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] lg:hidden">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(186,230,253,0.16),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(167,243,208,0.12),transparent_28%)]" />
-          <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="text-[0.72rem] uppercase tracking-[0.28em] text-cyan-100/70">Today&apos;s calories</div>
-              <div className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">{Math.round(totalCalories)} kcal</div>
-              <div className="mt-2 text-sm text-cyan-100/80">Target window {targetLabel}</div>
+          <div className="relative">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[0.72rem] uppercase tracking-[0.28em] text-cyan-100/70">Today&apos;s calories</div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight text-white">{Math.round(totalCalories)} kcal</div>
+                <div className="mt-2 text-sm text-cyan-100/80">Target window {targetLabel}</div>
+              </div>
+              <div className="rounded-full border border-white/15 bg-white/10 px-3 py-2 text-center text-xs text-slate-200">
+                <div className="uppercase tracking-[0.22em] text-slate-400">Progress</div>
+                <div className="mt-1 text-lg font-semibold text-white">{Math.round(calorieProgress)}%</div>
+              </div>
             </div>
-            <div className="rounded-full border border-white/15 bg-white/10 px-3 py-2 text-center text-xs text-slate-200 sm:text-right">
-              <div className="uppercase tracking-[0.22em] text-slate-400">Progress</div>
-              <div className="mt-1 text-lg font-semibold text-white">{Math.round(calorieProgress)}%</div>
+            <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-300 to-emerald-300" style={{ width: `${calorieProgress}%` }} />
             </div>
-          </div>
-          <div className="relative mt-5 h-2 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-300 to-emerald-300" style={{ width: `${calorieProgress}%` }} />
+            <div className="mt-4 rounded-2xl border border-white/10 bg-white/6 p-4">
+              <div className="text-[0.72rem] uppercase tracking-[0.28em] text-slate-400">Macros from resolved items</div>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {[
+                  { label: 'P', value: resolvedTotals.protein, accent: 'from-emerald-400/25 to-emerald-300/5' },
+                  { label: 'C', value: resolvedTotals.carbs, accent: 'from-amber-400/25 to-amber-300/5' },
+                  { label: 'F', value: resolvedTotals.fat, accent: 'from-fuchsia-400/25 to-fuchsia-300/5' },
+                ].map((macro) => (
+                  <div key={macro.label} className={`rounded-2xl border border-white/10 bg-gradient-to-b ${macro.accent} px-3 py-3 text-center`}>
+                    <div className="text-[0.68rem] uppercase tracking-[0.2em] text-slate-300">{macro.label}</div>
+                    <div className="mt-1 text-lg font-semibold text-white">{Math.round(macro.value)}g</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="rounded-[1.5rem] border border-rose-200/20 bg-gradient-to-br from-rose-100/8 via-white/6 to-violet-100/8 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.22)] backdrop-blur-xl">
-          <div className="text-[0.72rem] uppercase tracking-[0.28em] text-slate-400">Macros from resolved items</div>
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {[
-              { label: 'Protein', value: resolvedTotals.protein, accent: 'from-emerald-400/25 to-emerald-300/5' },
-              { label: 'Carbs', value: resolvedTotals.carbs, accent: 'from-amber-400/25 to-amber-300/5' },
-              { label: 'Fat', value: resolvedTotals.fat, accent: 'from-fuchsia-400/25 to-fuchsia-300/5' },
-            ].map((macro) => (
-              <div key={macro.label} className={`rounded-2xl border border-white/10 bg-gradient-to-b ${macro.accent} p-4 text-center shadow-sm`}>
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-300">{macro.label}</div>
-                <div className="mt-2 text-2xl font-semibold text-white">{formatMacro(macro.value)}</div>
+        <div className="hidden lg:grid lg:grid-cols-[1.05fr_0.95fr] lg:gap-3">
+          <div className="relative overflow-hidden rounded-[1.5rem] border border-sky-200/25 bg-gradient-to-br from-sky-300/18 via-slate-950 to-slate-900 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(186,230,253,0.16),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(167,243,208,0.12),transparent_28%)]" />
+            <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-[0.72rem] uppercase tracking-[0.28em] text-cyan-100/70">Today&apos;s calories</div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">{Math.round(totalCalories)} kcal</div>
+                <div className="mt-2 text-sm text-cyan-100/80">Target window {targetLabel}</div>
               </div>
-            ))}
+              <div className="rounded-full border border-white/15 bg-white/10 px-3 py-2 text-center text-xs text-slate-200 sm:text-right">
+                <div className="uppercase tracking-[0.22em] text-slate-400">Progress</div>
+                <div className="mt-1 text-lg font-semibold text-white">{Math.round(calorieProgress)}%</div>
+              </div>
+            </div>
+            <div className="relative mt-5 h-2 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-300 to-emerald-300" style={{ width: `${calorieProgress}%` }} />
+            </div>
           </div>
-          <div className="mt-4 text-sm text-slate-400">Macros update from resolved food items only, so they stay consistent with the entries Gemini has broken down.</div>
+
+          <div className="rounded-[1.5rem] border border-rose-200/20 bg-gradient-to-br from-rose-100/8 via-white/6 to-violet-100/8 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+            <div className="text-[0.72rem] uppercase tracking-[0.28em] text-slate-400">Macros from resolved items</div>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {[
+                { label: 'Protein', value: resolvedTotals.protein, accent: 'from-emerald-400/25 to-emerald-300/5' },
+                { label: 'Carbs', value: resolvedTotals.carbs, accent: 'from-amber-400/25 to-amber-300/5' },
+                { label: 'Fat', value: resolvedTotals.fat, accent: 'from-fuchsia-400/25 to-fuchsia-300/5' },
+              ].map((macro) => (
+                <div key={macro.label} className={`rounded-2xl border border-white/10 bg-gradient-to-b ${macro.accent} p-4 text-center shadow-sm`}>
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-300">{macro.label}</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">{formatMacro(macro.value)}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 text-sm text-slate-400">Macros update from resolved food items only, so they stay consistent with the entries Gemini has broken down.</div>
+          </div>
         </div>
       </section>
 
