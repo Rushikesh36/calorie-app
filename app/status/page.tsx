@@ -6,6 +6,8 @@ import type { DailyLog, WeightLog } from '@/lib/types';
 const dailyCalorieTarget = { minimum: 1200, maximum: 2500 };
 import StatusClient from '@/components/status-client';
 
+export const dynamic = 'force-dynamic';
+
 type RangeKey = 'week' | 'month' | 'all';
 
 type StatusPageProps = {

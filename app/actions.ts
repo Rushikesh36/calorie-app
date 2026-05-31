@@ -1,6 +1,6 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, unstable_noStore as noStore } from 'next/cache';
 import { getSupabaseClient } from '@/lib/supabase';
 import { callGemini } from '@/lib/gemini';
 import type { DailyLog, DailyInsight, FoodItem, TopPick, WeightLog } from '@/lib/types';
@@ -62,6 +62,7 @@ function mapRowToWeightLog(row: any): WeightLog {
 }
 
 export async function getLogsForDate(date: string): Promise<DailyLog[]> {
+  noStore();
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
@@ -81,6 +82,7 @@ export async function getLogsForDate(date: string): Promise<DailyLog[]> {
 }
 
 export async function getLogsInRange(opts?: { start?: Date; end?: Date }): Promise<DailyLog[]> {
+  noStore();
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 
@@ -96,6 +98,7 @@ export async function getLogsInRange(opts?: { start?: Date; end?: Date }): Promi
 }
 
 export async function getInsightForDate(date: string): Promise<DailyInsight | null> {
+  noStore();
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
@@ -105,6 +108,7 @@ export async function getInsightForDate(date: string): Promise<DailyInsight | nu
 }
 
 export async function getWeightLogsInRange(opts?: { start?: Date; end?: Date }): Promise<WeightLog[]> {
+  noStore();
   const supabase = getSupabaseClient();
   if (!supabase) return [];
 

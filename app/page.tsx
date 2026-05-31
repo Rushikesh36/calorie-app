@@ -3,6 +3,8 @@ import { TopNav } from '@/components/top-nav';
 import { getLogsInRange } from '@/app/actions';
 import { hasSupabaseCredentials } from '@/lib/supabase';
 
+export const dynamic = 'force-dynamic';
+
 export default async function HomePage() {
   const initialLogs = await getLogsInRange();
   const canPersist = hasSupabaseCredentials();
