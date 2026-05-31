@@ -1,35 +1,52 @@
-export type FoodItem = {
-  id: number;
+export type FoodStatus = "pending" | "resolved";
+
+export interface FoodItem {
+  id: string;
   name: string;
   calories: number;
-  protein_g: number;
-  carbs_g: number;
-  fat_g: number;
-  default_portion: string;
-  category: string;
-};
+  protein: number;
+  carbs: number;
+  fat: number;
+  unit: string;
+}
 
-export type FoodCategory = {
-  name: string;
-  description: string;
-  items: FoodItem[];
-};
+export interface DailyLog {
+  id: string;
+  logged_at: string;       // ISO timestamp
+  meal_slot: string | null;
+  raw_input: string;
+  quantity: string | null;
+  display_name: string;
+  food_id: string | null;
+  calories: number | null;
+  protein: number | null;
+  carbs: number | null;
+  fat: number | null;
+  status: FoodStatus;
+}
 
-export type DailyLogEntry = {
-  id: number;
-  food_id: number | null;
-  custom_name: string | null;
-  custom_calories: number | null;
-  timestamp: string;
-  food: FoodItem | null;
-};
+export interface DailyInsight {
+  date: string;
+  best_choice: string | null;
+  skip_suggestion: string | null;
+  intake_assessment: string | null;  // "too little" | "optimal" | "too much"
+  total_calories: number | null;
+  total_protein: number | null;
+  total_carbs: number | null;
+  total_fat: number | null;
+  gemini_summary: string | null;
+  synced_at: string;
+}
 
-export type ActionResult<T> =
-  | {
-      ok: true;
-      data: T;
-    }
-  | {
-      ok: false;
-      error: string;
-    };
+export interface WeightLog {
+  id: string;
+  measured_at: string;
+  weight_kg: number;
+  note: string | null;
+}
+
+export interface TopPick {
+  display_name: string;
+  raw_input: string;
+  count: number;
+}

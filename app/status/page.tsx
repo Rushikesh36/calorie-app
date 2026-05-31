@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { TopNav } from '@/components/top-nav';
-import { getLogsInRange } from '@/app/actions';
-import { dailyCalorieTarget } from '@/lib/meal-catalog';
-import type { DailyLogEntry } from '@/lib/types';
+import { getLogsInRange, getWeightLogsInRange } from '@/app/actions';
+import type { DailyLog, WeightLog } from '@/lib/types';
+
+const dailyCalorieTarget = { minimum: 1200, maximum: 2500 };
 import StatusClient from '@/components/status-client';
 
 type RangeKey = 'week' | 'month' | 'all';
@@ -35,19 +36,19 @@ function dayKey(date: Date) {
   return new Intl.DateTimeFormat('en-CA').format(date);
 }
 
-function getCalories(log: DailyLogEntry) {
-  return log.food?.calories ?? log.custom_calories ?? 0;
+function getCalories(log: DailyLog) {
+  return log.calories ?? 0;
 }
 
-function getDayTotal(logs: DailyLogEntry[]) {
+function getDayTotal(logs: DailyLog[]) {
   return logs.reduce((sum, log) => sum + getCalories(log), 0);
 }
 
-function groupByDay(logs: DailyLogEntry[]) {
-  const buckets = new Map<string, DailyLogEntry[]>();
+function groupByDay(logs: DailyLog[]) {
+  const buckets = new Map<string, DailyLog[]>();
 
   for (const log of logs) {
-    const key = dayKey(new Date(log.timestamp));
+    const key = dayKey(new Date(log.logged_at));
     const bucket = buckets.get(key) ?? [];
     bucket.push(log);
     buckets.set(key, bucket);
@@ -74,11 +75,11 @@ function createWindow(days: number) {
   return { start, end, dates };
 }
 
-function buildTopFoods(logs: DailyLogEntry[]) {
+function buildTopFoods(logs: DailyLog[]) {
   const counts = new Map<string, { calories: number; count: number }>();
 
   for (const log of logs) {
-    const name = log.food?.name ?? log.custom_name ?? 'Custom item';
+    const name = log.display_name ?? 'Custom item';
     const current = counts.get(name) ?? { calories: 0, count: 0 };
     current.count += 1;
     current.calories += getCalories(log);
@@ -97,10 +98,11 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
   const config = rangeConfig[selectedRange];
   const window = config.days ? createWindow(config.days) : null;
 
-  const logs = window ? await getLogsInRange({ start: window.start, end: window.end }) : await getLogsInRange();
+  const logs: DailyLog[] = window ? await getLogsInRange({ start: window.start, end: window.end }) : await getLogsInRange();
+  const weightLogs: WeightLog[] = window ? await getWeightLogsInRange({ start: window.start, end: window.end }) : await getWeightLogsInRange();
   // We will render aggregates and labels on the client so they use the user's local timezone.
   const totalCalories = getDayTotal(logs);
-  const uniqueDays = new Set(logs.map((log) => dayKey(new Date(log.timestamp)))).size || (window?.dates.length ?? 1);
+  const uniqueDays = new Set(logs.map((log) => dayKey(new Date(log.logged_at)))).size || (window?.dates.length ?? 1);
   const averagePerDay = uniqueDays > 0 ? totalCalories / uniqueDays : 0;
   const groupedDays = window
     ? window.dates.map((date) => {
@@ -161,10 +163,10 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
                 <Link
                   key={range}
                   href={`/status?range=${range}`}
-                  className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                  className={`rounded-full border px-4 py-2 text-sm font-medium transition shadow-sm ${
                     selectedRange === range
-                      ? 'border-cyan-300/40 bg-cyan-400/15 text-cyan-100'
-                      : 'border-white/10 bg-slate-950/60 text-slate-300 hover:bg-white/5 hover:text-white'
+                      ? 'border-cyan-200/30 bg-cyan-100/15 text-cyan-50'
+                      : 'border-white/10 bg-slate-950/40 text-slate-300 hover:bg-white/8 hover:text-white'
                   }`}
                 >
                   {rangeConfig[range].label}
@@ -176,7 +178,7 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
           </div>
 
           <div className="space-y-5">
-            <StatusClient logs={logs} rangeLabel={config.label} windowDates={window ? window.dates.map((d) => d.toISOString()) : null} />
+            <StatusClient logs={logs} weightLogs={weightLogs} rangeLabel={config.label} windowDates={window ? window.dates.map((d) => d.toISOString()) : null} />
           </div>
         </section>
       </div>

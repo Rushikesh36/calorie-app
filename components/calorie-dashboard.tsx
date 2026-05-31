@@ -1,1249 +1,550 @@
-'use client';
+"use client";
 
-import type { FormEvent } from 'react';
-import { useEffect, useMemo, useState } from 'react';
-import { addCustomLog, addFoodLog, deleteLog, updateLog } from '@/app/actions';
-import { dailyCalorieTarget, mealCatalog, mealCatalogByName } from '@/lib/meal-catalog';
-import type { DailyLogEntry } from '@/lib/types';
+import React, { FormEvent, useEffect, useMemo, useState } from "react";
+import { FiCheckCircle, FiClock, FiHeart } from 'react-icons/fi';
+import type { DailyLog, DailyInsight, FoodItem, TopPick } from "@/lib/types";
+import {
+  getTopPicksForTimeSlot,
+  searchFoodsInDB,
+  saveFoodToDB,
+  updateFoodFavourite,
+  addPendingLog,
+  addResolvedLog,
+  deleteLog,
+  syncDayWithGemini,
+  getFavouriteFoodsByNames,
+} from "@/app/actions";
 
-type CalorieDashboardProps = {
-  initialLogs: DailyLogEntry[];
+type Props = {
+  initialLogs: DailyLog[];
+  initialInsight?: DailyInsight | null;
   canPersist: boolean;
 };
 
-type TimeOfDayKey = 'morning' | 'afternoon' | 'evening' | 'night';
-
-type TimeOfDayBucket = {
-  key: TimeOfDayKey;
-  label: string;
-  helper: string;
-  hours: [number, number];
-  itemNames: string[];
-};
-
-type LogDraft = {
-  label: string;
-  calories: string;
-  timestamp: string;
-};
-
-const timeOfDayBuckets: TimeOfDayBucket[] = [
-  {
-    key: 'morning',
-    label: 'Morning',
-    helper: 'Breakfast and pre-workout',
-    hours: [5, 11],
-    itemNames: [
-      'High-Protein Overnight Oats',
-      'Morning Tea',
-      'Parle-G Biscuits',
-      'Boiled Eggs',
-      'Apple',
-      'Caffè Nero Coffee',
-    ],
-  },
-  {
-    key: 'afternoon',
-    label: 'Afternoon',
-    helper: 'Lunch and mid-day fuel',
-    hours: [12, 16],
-    itemNames: ['Vegetable Soya Pulao', 'Chobani Yogurt', 'Homemade Dry Fruit Barfi', 'Protein Shake'],
-  },
-  {
-    key: 'evening',
-    label: 'Evening',
-    helper: 'Main dinner plates',
-    hours: [17, 20],
-    itemNames: [
-      'Air-Fried Chicken Breast',
-      'Cooked White Rice',
-      'Cooked White Rice (veg portion)',
-      'Cooked Dal',
-      'Cooked Dal (veg portion)',
-      'Whole Wheat Roti',
-      'Soya Chunks',
-      'Whole Egg Bhurji',
-      'Whole Wheat Bread',
-      'Air-Fried Mixed Veggies',
-    ],
-  },
-  {
-    key: 'night',
-    label: 'Night',
-    helper: 'Late meal or final top-up',
-    hours: [21, 4],
-    itemNames: [
-      'High-Protein Overnight Oats',
-      'Morning Tea',
-      'Apple',
-      'Protein Shake',
-      'Whole Wheat Roti',
-      'Air-Fried Mixed Veggies',
-      'Caffè Nero Coffee',
-    ],
-  },
-];
-
-function getAutoTimeOfDay(): TimeOfDayKey {
-  const hour = new Date().getHours();
-
-  if (hour >= 5 && hour <= 11) {
-    return 'morning';
-  }
-
-  if (hour >= 12 && hour <= 16) {
-    return 'afternoon';
-  }
-
-  if (hour >= 17 && hour <= 20) {
-    return 'evening';
-  }
-
-  return 'night';
-}
-
-function formatCalories(value: number) {
-  return new Intl.NumberFormat('en-US').format(value);
-}
-
-function formatMacro(value: number) {
-  return `${formatCalories(value)}g`;
-}
-
-function getTimeOfDayBucket(key: TimeOfDayKey) {
-  return timeOfDayBuckets.find((bucket) => bucket.key === key) ?? timeOfDayBuckets[0];
-}
-
-function getItemNamesForBucket(bucket: TimeOfDayBucket) {
-  return bucket.itemNames;
-}
-
 function getLocalDateKey(date: Date) {
-  return new Intl.DateTimeFormat('en-CA').format(date);
-}
-
-function getDateFromKey(dateKey: string) {
-  return new Date(`${dateKey}T12:00:00`);
-}
-
-function formatDateTimeInputValue(timestamp: string) {
-  const date = new Date(timestamp);
-  const pad = (value: number) => String(value).padStart(2, '0');
-
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function buildTimestampForSelectedDate(dateKey: string) {
-  const now = new Date();
-  const [year, month, day] = dateKey.split('-').map(Number);
-  const timestamp = new Date(now);
-
-  timestamp.setFullYear(year, month - 1, day);
-  timestamp.setSeconds(0, 0);
-
-  return timestamp.toISOString();
+  return new Intl.DateTimeFormat("en-CA").format(date);
 }
 
 function formatDateKeyLabel(dateKey: string) {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(getDateFromKey(dateKey));
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${dateKey}T12:00:00`));
 }
 
-function getFoodName(log: DailyLogEntry) {
-  return log.food?.name ?? log.custom_name ?? 'Custom item';
+function determineTimeSlot(date: Date) {
+  const h = date.getHours();
+  if (h >= 5 && h <= 10) return "morning";
+  if (h >= 11 && h <= 14) return "afternoon";
+  if (h >= 15 && h <= 20) return "evening";
+  return "night";
 }
 
-function getRecommendedMeals(meals: typeof mealCatalog[number]['items'], calorieRoom: number) {
-  const sortedMeals = [...meals].sort((left, right) => right.calories - left.calories);
-
-  const fittingMeals = sortedMeals.filter((meal) => meal.calories <= calorieRoom);
-  const fallbackMeals = sortedMeals.slice(-3).reverse();
-
-  return (fittingMeals.length > 0 ? fittingMeals : fallbackMeals).slice(0, 3);
+function slotToHour(slot: string) {
+  switch (slot) {
+    case 'morning':
+      return 8;
+    case 'afternoon':
+      return 13;
+    case 'evening':
+      return 18;
+    case 'night':
+    default:
+      return 21;
+  }
 }
 
-function getBestCatalogMatch(query: string) {
-  const normalizedQuery = normalizeText(query);
-
-  if (!normalizedQuery) {
-    return null;
-  }
-
-  const queryTokens = normalizedQuery.split(' ').filter(Boolean);
-  const allFoods = mealCatalog.flatMap((group) => group.items);
-
-  const ranked = allFoods
-    .map((item) => {
-      const haystack = normalizeText(`${item.name} ${item.default_portion} ${item.category}`);
-      const nameTokens = normalizeText(item.name).split(' ').filter(Boolean);
-
-      const directMatch = haystack === normalizedQuery ? 50 : 0;
-      const prefixMatch = haystack.startsWith(normalizedQuery) ? 20 : 0;
-      const tokenMatch = queryTokens.reduce((score, token) => score + (haystack.includes(token) ? 8 : 0), 0);
-      const nameMatch = nameTokens.reduce((score, token) => score + (normalizedQuery.includes(token) ? 10 : 0), 0);
-      const fuzzyMatch = nameTokens.some((token) => isLooseTextMatch(normalizedQuery, token)) ? 12 : 0;
-
-      return {
-        item,
-        score: directMatch + prefixMatch + tokenMatch + nameMatch + fuzzyMatch,
-      };
-    })
-    .filter((candidate) => candidate.score >= 12)
-    .sort((left, right) => right.score - left.score);
-
-  return ranked[0]?.item ?? null;
+function buildTimestampForSlot(dateKey: string, slot: string) {
+  const date = new Date(`${dateKey}T12:00:00`);
+  date.setHours(slotToHour(slot), 0, 0, 0);
+  return date.toISOString();
 }
 
-function getQuantityFromText(text: string) {
-  const normalized = normalizeText(text);
-
-  if (!normalized) {
-    return 1;
-  }
-
-  if (/\bone and a half\b|\bone and half\b/.test(normalized)) {
-    return 1.5;
-  }
-
-  if (/\bhalf\b/.test(normalized)) {
-    return 0.5;
-  }
-
-  if (/\bquarter\b/.test(normalized)) {
-    return 0.25;
-  }
-
-  if (/\btriple\b/.test(normalized)) {
-    return 3;
-  }
-
-  if (/\bdouble\b/.test(normalized)) {
-    return 2;
-  }
-
-  const prefixQuantityMatch = normalized.match(/^((?:\d+(?:\.\d+)?)|(?:one(?:\s+and\s+a\s+half)?))\s*(?:x|times)?\b/);
-
-  if (prefixQuantityMatch) {
-    const value = prefixQuantityMatch[1];
-
-    if (value === 'one' || value.startsWith('one and a half')) {
-      return value.includes('half') ? 1.5 : 1;
-    }
-
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-  }
-
-  const embeddedQuantityMatch = normalized.match(/\b(\d+(?:\.\d+)?)\s*(?:packet|packets|piece|pieces|cup|cups|bowl|bowls|slice|slices|egg|eggs|roti|rotis|serving|servings|scoop|scoops)\b/);
-
-  if (embeddedQuantityMatch) {
-    const parsed = Number(embeddedQuantityMatch[1]);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
-  }
-
-  return 1;
+function labelTimeSlot(slot: string) {
+  return slot.charAt(0).toUpperCase() + slot.slice(1);
 }
 
-function inferFromAlias(text: string) {
-  const normalized = normalizeText(text);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const aliasCatalog = [
-    { terms: ['maggi', 'instant noodles', 'noodles'], label: 'Maggi / noodles', calories: 350 },
-    { terms: ['sandwich', 'bread sandwich'], label: 'Sandwich', calories: 250 },
-    { terms: ['banana'], label: 'Banana', calories: 105 },
-    { terms: ['milk'], label: 'Milk', calories: 150 },
-    { terms: ['fries', 'french fries'], label: 'Fries', calories: 300 },
-    { terms: ['burger'], label: 'Burger', calories: 350 },
-    { terms: ['omelette'], label: 'Omelette', calories: 180 },
-  ];
-
-  const matched = aliasCatalog.find((entry) =>
-    entry.terms.some((term) => normalized.includes(normalizeText(term)) || isLooseTextMatch(normalized, normalizeText(term))),
-  );
-
-  if (!matched) {
-    return null;
-  }
-
-  const quantity = getQuantityFromText(text);
-
-  return {
-    itemName: matched.label,
-    calories: Math.round(matched.calories * quantity),
-  };
+function getLogMealSlot(log: DailyLog) {
+  return log.meal_slot ?? determineTimeSlot(new Date(log.logged_at));
 }
 
-function canScaleCatalogItem(item: (typeof mealCatalog)[number]['items'][number]) {
-  const portion = normalizeText(item.default_portion);
-  return /\b(egg|eggs|slice|slices|piece|pieces|cup|cups|scoop|scoops|roti|rotis|packet|packets)\b/.test(portion);
+function formatMacro(value: number) {
+  return `${Math.round(value)}g`;
 }
 
-function getCatalogBaseQuantity(item: (typeof mealCatalog)[number]['items'][number]) {
-  const portion = normalizeText(item.default_portion);
-  const countMatch = portion.match(/(\d+(?:\.\d+)?)/);
+const surfaceInputClass =
+  'rounded-full border border-white/10 bg-white/8 px-4 py-2 text-white placeholder:text-slate-400 shadow-inner outline-none transition focus:border-cyan-200/40 focus:bg-white/12';
 
-  if (!countMatch) {
-    return 1;
-  }
+const pastelButtonClass =
+  'rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-white/16 focus:outline-none focus:ring-2 focus:ring-cyan-200/30';
 
-  const parsed = Number(countMatch[1]);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
+const syncButtonClass =
+  'rounded-full border border-cyan-200/20 bg-gradient-to-r from-cyan-200/20 to-emerald-200/20 px-4 py-2 text-white ring-1 ring-inset ring-cyan-100/20 transition hover:from-cyan-200/28 hover:to-emerald-200/28 disabled:cursor-not-allowed disabled:opacity-50';
 
-function getMealScore(item: (typeof mealCatalog)[number]['items'][number], calorieRoom: number) {
-  const text = `${item.name} ${item.default_portion} ${item.category}`.toLowerCase();
-  const proteinSignals = ['protein', 'egg', 'chicken', 'soya', 'dal', 'yogurt'];
-  const lightSignals = ['apple', 'coffee', 'tea', 'veg', 'salad'];
+const pastelChipClass =
+  'rounded-full border border-emerald-200/25 bg-emerald-100/10 px-3 py-1 text-emerald-50 transition hover:bg-emerald-100/20';
 
-  let score = 0;
+const pastelAddButtonClass =
+  'rounded-full border border-violet-200/20 bg-violet-100/12 px-4 py-2 text-violet-50 ring-1 ring-inset ring-violet-200/20 transition hover:bg-violet-100/20';
 
-  if (item.calories <= calorieRoom) {
-    score += 30;
-  }
+const pastelDeleteButtonClass =
+  'rounded-full border border-white/12 bg-white/8 px-3 py-1 text-sm text-white transition hover:bg-white/15';
 
-  if (item.calories <= Math.max(250, calorieRoom * 0.35)) {
-    score += 10;
-  }
+const pastelHeartButtonClass =
+  'rounded-full border border-rose-200/20 bg-rose-100/10 px-2 py-1 text-rose-100 transition hover:bg-rose-100/20 disabled:opacity-60';
 
-  if (proteinSignals.some((signal) => text.includes(signal))) {
-    score += 20;
-  }
+const mealTagClass =
+  'inline-flex items-center rounded-full border border-sky-200/15 bg-sky-100/10 px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-sky-50';
 
-  if (lightSignals.some((signal) => text.includes(signal))) {
-    score += 8;
-  }
-
-  return score + Math.min(item.calories / 10, 25);
-}
-
-function getCatalogSuggestions(query: string) {
-  const normalizedQuery = normalizeText(query);
-
-  if (!normalizedQuery) {
-    return [];
-  }
-
-  const queryTokens = normalizedQuery.split(' ').filter(Boolean);
-  const allFoods = mealCatalog.flatMap((group) => group.items);
-
-  return allFoods
-    .map((item) => {
-      const haystack = normalizeText(`${item.name} ${item.default_portion} ${item.category}`);
-      const exactMatch = haystack === normalizedQuery ? 40 : 0;
-      const prefixMatch = haystack.startsWith(normalizedQuery) ? 20 : 0;
-      const tokenMatch = queryTokens.reduce((score, token) => score + (haystack.includes(token) ? 10 : 0), 0);
-      const calorieSignal = item.calories < 100 ? 3 : item.calories < 250 ? 7 : 10;
-
-      return {
-        item,
-        score: exactMatch + prefixMatch + tokenMatch + calorieSignal,
-      };
-    })
-    .filter((candidate) => candidate.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 3)
-    .map((candidate) => candidate.item);
-}
-
-function normalizeText(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function isLooseTextMatch(query: string, term: string) {
-  if (!query || !term) {
-    return false;
-  }
-
-  if (query === term || query.includes(term) || term.includes(query)) {
-    return true;
-  }
-
-  if (query.length !== term.length) {
-    return false;
-  }
-
-  const mismatches: number[] = [];
-
-  for (let index = 0; index < query.length; index += 1) {
-    if (query[index] !== term[index]) {
-      mismatches.push(index);
-
-      if (mismatches.length > 2) {
-        return false;
-      }
-    }
-  }
-
-  if (mismatches.length === 1) {
-    return true;
-  }
-
-  if (mismatches.length !== 2) {
-    return false;
-  }
-
-  const [firstMismatch, secondMismatch] = mismatches;
-  return (
-    firstMismatch + 1 === secondMismatch &&
-    query[firstMismatch] === term[secondMismatch] &&
-    query[secondMismatch] === term[firstMismatch]
-  );
-}
-
-function extractPlainTextEntry(rawText: string, fallbackCaloriesText: string) {
-  const cleanedText = rawText.trim();
-
-  if (!cleanedText) {
-    return { error: 'Type a food name first.' };
-  }
-
-  const trailingCaloriesMatch = cleanedText.match(/^(.*?)(?:\s*(?:-|:|=)\s*)(\d+(?:\.\d+)?)\s*(?:kcal|cal)?$/i);
-  const inlineCaloriesMatch = cleanedText.match(/^(.*?)(\d+(?:\.\d+)?)\s*(?:kcal|cal)?$/i);
-
-  let itemName = cleanedText;
-  let caloriesText = fallbackCaloriesText.trim();
-
-  if (trailingCaloriesMatch) {
-    itemName = trailingCaloriesMatch[1].trim();
-    caloriesText = trailingCaloriesMatch[2];
-  } else if (inlineCaloriesMatch && fallbackCaloriesText.trim()) {
-    itemName = inlineCaloriesMatch[1].trim();
-  }
-
-  const normalizedName = normalizeText(itemName);
-  const matchedFood = mealCatalogByName[itemName] ?? getBestCatalogMatch(itemName);
-  const aliasMatch = inferFromAlias(itemName);
-
-  if (aliasMatch && !caloriesText) {
-    return aliasMatch;
-  }
-
-  const parsedCalories = Number(caloriesText || (matchedFood ? String(matchedFood.calories) : ''));
-  const isExactCatalogMatch = matchedFood ? normalizeText(matchedFood.name) === normalizedName : false;
-
-  if (!Number.isFinite(parsedCalories) || parsedCalories <= 0) {
-    if (matchedFood) {
-      const quantity = getQuantityFromText(itemName);
-
-      if (quantity !== 1 && canScaleCatalogItem(matchedFood)) {
-        const baseQuantity = getCatalogBaseQuantity(matchedFood);
-
-        return {
-          itemName: matchedFood.name,
-          calories: Math.max(1, Math.round((matchedFood.calories / baseQuantity) * quantity)),
-        };
-      }
-
-      return {
-        itemName: matchedFood.name,
-        calories: matchedFood.calories,
-      };
-    }
-
-    if (aliasMatch) {
-      return aliasMatch;
-    }
-
-    return { error: 'Add calories like "maggi 350" or pick one of the fixed cards.' };
-  }
-
-  return {
-    itemName: aliasMatch?.itemName ?? (isExactCatalogMatch ? matchedFood?.name ?? itemName : itemName),
-    calories: Math.round(parsedCalories),
-  };
-}
-
-  function formatTime(timestamp: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  }).format(new Date(timestamp));
-}
-
-function createFoodLog(foodName: string, timestamp: string): DailyLogEntry | null {
-  const food = mealCatalogByName[foodName];
-
-  if (!food) {
-    return null;
-  }
-
-  return {
-    id: Date.now(),
-    food_id: food.id,
-    custom_name: null,
-    custom_calories: null,
-    timestamp,
-    food,
-  };
-}
-
-function createCustomLog(customName: string, calories: number, timestamp: string): DailyLogEntry {
-  return {
-    id: Date.now(),
-    food_id: null,
-    custom_name: customName,
-    custom_calories: calories,
-    timestamp,
-    food: null,
-  };
-}
-
-export function CalorieDashboard({ initialLogs, canPersist }: CalorieDashboardProps) {
-  const [logs, setLogs] = useState<DailyLogEntry[]>(initialLogs);
+export function CalorieDashboard({ initialLogs, initialInsight = null, canPersist }: Props) {
+  const [logs, setLogs] = useState<DailyLog[]>(() => {
+    const arr = (initialLogs ?? []).map((l) => ({
+      ...l,
+      meal_slot: l.meal_slot ?? determineTimeSlot(new Date(l.logged_at)),
+    }));
+    return arr;
+  });
+  const [insight, setInsight] = useState<DailyInsight | null>(initialInsight ?? null);
   const [selectedDate, setSelectedDate] = useState(() => getLocalDateKey(new Date()));
   const [followToday, setFollowToday] = useState(true);
-  const [pendingLabel, setPendingLabel] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [plainTextItem, setPlainTextItem] = useState('');
-  const [plainTextCalories, setPlainTextCalories] = useState('');
-  const [selectedBucket, setSelectedBucket] = useState<TimeOfDayKey>(getAutoTimeOfDay());
-  const [editingLogId, setEditingLogId] = useState<number | null>(null);
-  const [editDraft, setEditDraft] = useState<LogDraft | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<FoodItem[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [topPicks, setTopPicks] = useState<TopPick[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [timeOfDay, setTimeOfDay] = useState(() => determineTimeSlot(new Date()));
+  const [heartedLogs, setHeartedLogs] = useState<Record<string, boolean>>({});
+  const todayKey = getLocalDateKey(new Date());
 
   useEffect(() => {
-    if (!followToday) {
+    // Initialize hearted state from persisted `foods.is_favourite`
+    const resolvedNames = Array.from(new Set(logs.filter((l) => l.status === 'resolved').map((l) => l.display_name)));
+    if (resolvedNames.length === 0) return;
+
+    let mounted = true;
+    (async () => {
+      try {
+        const favs = await getFavouriteFoodsByNames(resolvedNames);
+        if (!mounted) return;
+        if (!favs || favs.length === 0) return;
+        setHeartedLogs((current) => {
+          const next = { ...current };
+          logs.forEach((l) => {
+            if (l.status === 'resolved' && favs.includes(l.display_name)) next[l.id] = true;
+          });
+          return next;
+        });
+      } catch (err) {
+        console.error('Failed to load favourites', err);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [logs]);
+
+  useEffect(() => {
+    if (!followToday) return;
+    const tick = () => setSelectedDate(getLocalDateKey(new Date()));
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(24, 0, 0, 0);
+    const t = next.getTime() - now.getTime();
+    const id = window.setTimeout(() => {
+      tick();
+      setTimeout(tick, t);
+    }, t);
+    return () => window.clearTimeout(id);
+  }, [followToday]);
+
+  useEffect(() => {
+    getTopPicksForTimeSlot(timeOfDay as any).then((p) => setTopPicks(p || []));
+  }, [timeOfDay, selectedDate]);
+
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
       return;
     }
 
-    let timeoutId = window.setTimeout(function tick() {
-      setSelectedDate(getLocalDateKey(new Date()));
+    const id = setTimeout(async () => {
+      const res = await searchFoodsInDB(searchQuery);
+      setSearchResults(res || []);
+      setShowDropdown(true);
+    }, 400);
 
-      const now = new Date();
-      const nextMidnight = new Date(now);
-      nextMidnight.setHours(24, 0, 0, 25);
+    return () => clearTimeout(id);
+  }, [searchQuery]);
 
-      timeoutId = window.setTimeout(tick, nextMidnight.getTime() - now.getTime());
-    }, (() => {
-      const now = new Date();
-      const nextMidnight = new Date(now);
-      nextMidnight.setHours(24, 0, 0, 25);
-      return nextMidnight.getTime() - now.getTime();
-    })());
-
-    return () => window.clearTimeout(timeoutId);
-  }, [followToday]);
-
-  const todayKey = getLocalDateKey(new Date());
   const selectedDayLogs = useMemo(
-    () =>
-      [...logs]
-        .filter((log) => getLocalDateKey(new Date(log.timestamp)) === selectedDate)
-        .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime()),
+    () => logs.filter((l) => new Date(l.logged_at).toLocaleDateString("en-CA") === selectedDate).sort((a, b) => Number(new Date(b.logged_at)) - Number(new Date(a.logged_at))),
     [logs, selectedDate],
   );
 
-  useEffect(() => {
-    if (editingLogId === null) {
-      return;
-    }
-
-    if (!selectedDayLogs.some((log) => log.id === editingLogId)) {
-      setEditingLogId(null);
-      setEditDraft(null);
-    }
-  }, [editingLogId, selectedDayLogs]);
-
-  const totalCalories = useMemo(
-    () =>
-      selectedDayLogs.reduce((sum, log) => {
-        if (log.food) {
-          return sum + log.food.calories;
+  const resolvedTotals = useMemo(() => {
+    return selectedDayLogs.reduce(
+      (acc, l) => {
+        if (l.status === "resolved") {
+          acc.calories += l.calories ?? 0;
+          acc.protein += l.protein ?? 0;
+          acc.carbs += l.carbs ?? 0;
+          acc.fat += l.fat ?? 0;
         }
+        return acc;
+      },
+      { calories: 0, protein: 0, carbs: 0, fat: 0 },
+    );
+  }, [selectedDayLogs]);
 
-        return sum + (log.custom_calories ?? 0);
-      }, 0),
-    [selectedDayLogs],
-  );
-  const totalMacros = useMemo(
-    () =>
-      selectedDayLogs.reduce(
-        (totals, log) => {
-          if (log.food) {
-            totals.protein += log.food.protein_g;
-            totals.carbs += log.food.carbs_g;
-            totals.fat += log.food.fat_g;
-          }
+  const totalCalories = resolvedTotals.calories;
+  const targetLow = 1900;
+  const targetHigh = 2100;
+  const targetLabel = `${targetLow}-${targetHigh} kcal`;
+  const calorieProgress = Math.min((totalCalories / targetHigh) * 100, 100);
 
-          return totals;
-        },
-        { protein: 0, carbs: 0, fat: 0 },
-      ),
-    [selectedDayLogs],
-  );
+  const pendingCount = selectedDayLogs.filter((l) => l.status === "pending").length;
 
-  const progress = Math.min((totalCalories / dailyCalorieTarget.maximum) * 100, 100);
-  const inRange = totalCalories >= dailyCalorieTarget.minimum && totalCalories <= dailyCalorieTarget.maximum;
-  const isOver = totalCalories > dailyCalorieTarget.maximum;
-  const remainingToFloor = Math.max(dailyCalorieTarget.minimum - totalCalories, 0);
-  const remainingToCeiling = Math.max(dailyCalorieTarget.maximum - totalCalories, 0);
-  const syncLabel = canPersist ? '' : 'Local preview mode';
-  const activeBucket = getTimeOfDayBucket(selectedBucket);
-  const activeMeals = mealCatalog.flatMap((group) => group.items).filter((item) => getItemNamesForBucket(activeBucket).includes(item.name));
-  const recommendedMeals = [...getRecommendedMeals(activeMeals, remainingToCeiling)]
-    .sort((left, right) => getMealScore(right, remainingToCeiling) - getMealScore(left, remainingToCeiling));
-  const parsedPlainText = extractPlainTextEntry(plainTextItem, plainTextCalories);
-  const catalogSuggestions = getCatalogSuggestions(plainTextItem);
-  const parsedRecommendation = 'error' in parsedPlainText ? null : parsedPlainText;
+  async function handleSelectSearchResult(item: FoodItem) {
+    setShowDropdown(false);
+    // keep searchQuery available to parse quantity
+    const originalInput = searchQuery.trim();
+    setSearchQuery("");
+    setPendingKey(item.id);
+    const timestamp = buildTimestampForSlot(selectedDate, timeOfDay);
 
-  function setDateSelection(dateKey: string, shouldFollowToday = dateKey === todayKey) {
-    setSelectedDate(dateKey);
-    setFollowToday(shouldFollowToday);
-    setEditingLogId(null);
-    setEditDraft(null);
-  }
-
-  function beginEdit(log: DailyLogEntry) {
-    setEditingLogId(log.id);
-    setEditDraft({
-      label: getFoodName(log),
-      calories: String(log.food?.calories ?? log.custom_calories ?? 0),
-      timestamp: formatDateTimeInputValue(log.timestamp),
-    });
-    setNotice(null);
-  }
-
-  function cancelEdit() {
-    setEditingLogId(null);
-    setEditDraft(null);
-  }
-
-  async function saveEditedLog(logId: number) {
-    if (!editDraft) {
-      return;
-    }
-
-    const trimmedLabel = editDraft.label.trim();
-    const parsedCalories = Number(editDraft.calories);
-    const parsedTimestamp = new Date(editDraft.timestamp);
-
-    if (!trimmedLabel) {
-      setNotice('Add a food name before saving the edit.');
-      return;
-    }
-
-    if (!Number.isFinite(parsedCalories) || parsedCalories <= 0) {
-      setNotice('Calories must be a positive number.');
-      return;
-    }
-
-    if (Number.isNaN(parsedTimestamp.getTime())) {
-      setNotice('Pick a valid date and time for the log.');
-      return;
-    }
-
-    setPendingLabel(`edit-${logId}`);
-    setNotice(null);
+    // try to parse quantity from original input (e.g. "3 boiled eggs")
+    const parsed = parseQuantityAndName(originalInput || item.name);
+    const quantity = parsed.quantity ?? undefined;
 
     if (!canPersist) {
-      setLogs((current) =>
-        current.map((log) =>
-          log.id === logId
-            ? {
-                ...log,
-                food_id: null,
-                food: null,
-                custom_name: trimmedLabel,
-                custom_calories: Math.round(parsedCalories),
-                timestamp: parsedTimestamp.toISOString(),
-              }
-            : log,
-        ),
-      );
-      cancelEdit();
-      setNotice('Log updated locally. Add Supabase env vars to sync it.');
-      setPendingLabel(null);
+      const optimistic: DailyLog = {
+        id: `local-${Date.now()}`,
+        logged_at: timestamp,
+        meal_slot: timeOfDay,
+        raw_input: item.name,
+        quantity: quantity,
+        display_name: parsed.name || item.name,
+        food_id: item.id,
+        calories: item.calories,
+        protein: item.protein,
+        carbs: item.carbs,
+        fat: item.fat,
+        status: "resolved",
+      } as unknown as DailyLog;
+      setLogs((s) => [optimistic, ...s]);
+      setPendingKey(null);
       return;
     }
 
-    const result = await updateLog(logId, trimmedLabel, parsedCalories, parsedTimestamp.toISOString());
-
-    if (result.ok) {
-      setLogs((current) =>
-        current
-          .map((log) => (log.id === logId ? result.data : log))
-          .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime()),
-      );
-      cancelEdit();
-      setNotice('Log updated.');
+    const added = await addResolvedLog({ food_id: item.id, display_name: parsed.name || item.name, timestamp, meal_slot: timeOfDay, quantity });
+    if (added) {
+      const normalized = { ...added, meal_slot: added.meal_slot ?? determineTimeSlot(new Date(added.logged_at)) } as DailyLog;
+      setLogs((s) => [normalized, ...s]);
     } else {
-      setNotice(result.error);
+      console.error('Failed to add resolved log for', item);
+      try {
+        // eslint-disable-next-line no-alert
+        alert('Failed to add entry. Check server logs for details.');
+      } catch (e) {}
     }
-
-    setPendingLabel(null);
+    setPendingKey(null);
   }
 
-  async function handleQuickAdd(foodName: string) {
-    const timestamp = buildTimestampForSelectedDate(selectedDate);
-
+  async function handleAddPending(display_name: string) {
+    setPendingKey(display_name);
+    const originalInput = display_name.trim();
+    const parsed = parseQuantityAndName(originalInput);
+    const quantity = parsed.quantity ?? undefined;
+    const timestamp = buildTimestampForSlot(selectedDate, timeOfDay);
     if (!canPersist) {
-      const optimistic = createFoodLog(foodName, timestamp);
-
-      if (optimistic) {
-        setLogs((current) => [optimistic, ...current]);
-        setNotice(`${foodName} saved locally. Add Supabase env vars to sync it.`);
-      } else {
-        setNotice('That food is not available in the catalog.');
+      const optimistic: DailyLog = {
+        id: `local-${Date.now()}`,
+        logged_at: timestamp,
+        meal_slot: timeOfDay,
+        raw_input: parsed.name ?? display_name,
+        quantity: parsed.quantity ?? null,
+        display_name: parsed.name ?? display_name,
+        food_id: null,
+        calories: null,
+        protein: null,
+        carbs: null,
+        fat: null,
+        status: "pending",
+      } as unknown as DailyLog;
+      setLogs((s) => [optimistic, ...s]);
+      setPendingKey(null);
+      return;
+    }
+    const added = await addPendingLog({ raw_input: parsed.name ?? display_name, display_name: parsed.name ?? display_name, timestamp, meal_slot: timeOfDay, quantity });
+    if (added) {
+      const normalized = { ...added, meal_slot: added.meal_slot ?? determineTimeSlot(new Date(added.logged_at)) } as DailyLog;
+      setLogs((s) => [normalized, ...s]);
+    } else {
+      console.error('Failed to add pending log for', display_name);
+      // show a simple alert so the user sees the failure in the browser
+      try {
+        // eslint-disable-next-line no-alert
+        alert('Failed to add entry. Check server logs for details.');
+      } catch (e) {
+        // ignore in non-browser contexts
       }
-
-      return;
     }
+    setPendingKey(null);
+  }
 
-    setPendingLabel(foodName);
-    setNotice(null);
+  function parseQuantityAndName(input: string): { quantity?: string | null; name: string } {
+    const trimmed = (input || '').trim();
+    // match patterns like "3 boiled eggs", "2x boiled eggs", "1.5 cups oats"
+    const re = /^\s*(\d+(?:[\.,]\d+)?)\s*(?:x|pcs|pieces|servings|serving|portion|portions|cup|cups)?\s+(.+)$/i;
+    const m = re.exec(trimmed);
+    if (m) {
+      // normalize decimal comma to dot
+      const qty = m[1].replace(',', '.');
+      const name = m[2].trim();
+      return { quantity: qty, name };
+    }
+    return { quantity: null, name: trimmed };
+  }
 
-    const result = await addFoodLog(foodName, timestamp);
+  async function handleDelete(id: string) {
+    setPendingKey(`del-${id}`);
+    const ok = await deleteLog(id);
+    if (ok) setLogs((s) => s.filter((l) => l.id !== id));
+    setPendingKey(null);
+  }
 
-    if (result.ok) {
-      setLogs((current) => [result.data, ...current]);
-      setNotice(`${foodName} added.`);
+  async function handleHeart(log: DailyLog) {
+    if (log.status !== 'resolved') return;
+    setPendingKey(`heart-${log.id}`);
+    const currently = heartedLogs[log.id];
+    let ok = false;
+    if (currently) {
+      ok = await updateFoodFavourite(log.display_name, false);
+      if (ok) setHeartedLogs((c) => ({ ...c, [log.id]: false }));
     } else {
-      setNotice(result.error);
+      ok = await saveFoodToDB({
+        name: log.display_name,
+        calories: log.calories ?? 0,
+        protein: log.protein ?? 0,
+        carbs: log.carbs ?? 0,
+        fat: log.fat ?? 0,
+        unit: log.quantity ?? 'serving',
+      });
+      if (ok) setHeartedLogs((current) => ({ ...current, [log.id]: true }));
     }
 
-    setPendingLabel(null);
+    if (!ok) console.error('Heart toggle failed for', log.display_name);
+    setPendingKey(null);
   }
 
-  async function handleDelete(logId: number) {
-    const existing = logs.find((log) => log.id === logId);
-
-    if (!existing) {
-      return;
+  async function handleSync() {
+    setIsSyncing(true);
+    try {
+      const res = await syncDayWithGemini(selectedDate, timeOfDay);
+      setLogs((current) => {
+        const other = current.filter((l) => new Date(l.logged_at).toLocaleDateString("en-CA") !== selectedDate);
+        return [...(res.logs || []), ...other];
+      });
+      setInsight(res.insight ?? null);
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setIsSyncing(false);
     }
-
-    if (!canPersist) {
-      setLogs((current) => current.filter((log) => log.id !== logId));
-      if (editingLogId === logId) {
-        cancelEdit();
-      }
-      setNotice(`${getFoodName(existing)} removed.`);
-      return;
-    }
-
-    setPendingLabel(`delete-${logId}`);
-    setNotice(null);
-
-    const result = await deleteLog(logId);
-
-    if (result.ok) {
-      setLogs((current) => current.filter((log) => log.id !== logId));
-      if (editingLogId === logId) {
-        cancelEdit();
-      }
-      setNotice(`${getFoodName(existing)} removed.`);
-    } else {
-      setNotice(result.error);
-    }
-
-    setPendingLabel(null);
   }
-
-  async function handleCustomSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const parsed = extractPlainTextEntry(plainTextItem, plainTextCalories);
-
-    await saveParsedCustomLog(parsed);
-  }
-
-  async function saveParsedCustomLog(parsed: ReturnType<typeof extractPlainTextEntry>) {
-    if ('error' in parsed) {
-      setNotice(parsed.error);
-      return;
-    }
-
-    if (pendingLabel === 'custom') {
-      return;
-    }
-
-    if (!canPersist) {
-      setLogs((current) => [createCustomLog(parsed.itemName, parsed.calories, buildTimestampForSelectedDate(selectedDate)), ...current]);
-      setPlainTextItem('');
-      setPlainTextCalories('');
-      setNotice('One-off item saved locally. Add Supabase env vars to sync it.');
-      return;
-    }
-
-    setPendingLabel('custom');
-    setNotice(null);
-
-    const result = await addCustomLog(parsed.itemName, parsed.calories, buildTimestampForSelectedDate(selectedDate));
-
-    if (result.ok) {
-      setLogs((current) => [result.data, ...current]);
-      setPlainTextItem('');
-      setPlainTextCalories('');
-      setNotice(`${parsed.itemName} saved as a one-off item.`);
-    } else {
-      setNotice(result.error);
-    }
-
-    setPendingLabel(null);
-  }
-
-  const selectedDayLabel = selectedDate === todayKey ? "Today's log" : `${formatDateKeyLabel(selectedDate)} log`;
 
   return (
-    <div className="mx-auto flex min-h-screen w-full flex-col gap-5">
-      <header className="rounded-[2rem] border border-white/10 bg-white/5 p-4 shadow-soft backdrop-blur-xl sm:p-5 lg:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-medium tracking-[0.2em] text-cyan-100 uppercase">
-                Daily calorie tracker
-              </div>
-              {syncLabel ? (
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs font-medium text-slate-300">
-                  {syncLabel}
-                </div>
-              ) : null}
-            </div>
-              <div className="space-y-2">
-              </div>
-          </div>
+    <div className="mx-auto w-full max-w-3xl p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">{selectedDate === todayKey ? "Today's log" : `${formatDateKeyLabel(selectedDate)} log`}</h2>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            aria-label="Select date"
+            type="date"
+            value={selectedDate}
+            onChange={(e) => {
+              setSelectedDate(e.target.value);
+              setFollowToday(false);
+            }}
+            className={surfaceInputClass}
+          />
+          <button className={syncButtonClass} disabled={isSyncing || selectedDayLogs.length === 0} onClick={handleSync}>
+            {isSyncing ? "Syncing…" : "⚡ Sync & Analyse Day"}
+          </button>
+        </div>
+      </div>
 
-          <div className="w-full max-w-md rounded-[1.5rem] border border-white/10 bg-slate-950/70 p-4">
-            <div className="flex items-center justify-between text-sm text-slate-400">
-              <span>Current total</span>
-              <span>{formatCalories(totalCalories)} kcal</span>
+      <section className="mt-4 grid gap-3 lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="relative overflow-hidden rounded-[1.5rem] border border-sky-200/25 bg-gradient-to-br from-sky-300/18 via-slate-950 to-slate-900 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(186,230,253,0.16),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(167,243,208,0.12),transparent_28%)]" />
+          <div className="relative flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[0.72rem] uppercase tracking-[0.28em] text-cyan-100/70">Today&apos;s calories</div>
+              <div className="mt-2 text-4xl font-semibold tracking-tight text-white">{Math.round(totalCalories)} kcal</div>
+              <div className="mt-2 text-sm text-cyan-100/80">Target window {targetLabel}</div>
             </div>
-            <div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-800/80">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  isOver ? 'bg-gradient-to-r from-rose-500 via-orange-400 to-amber-300' : inRange ? 'bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-400' : 'bg-gradient-to-r from-slate-400 via-sky-400 to-cyan-300'
-                }`}
-                style={{ width: `${progress}%` }}
-              />
+            <div className="rounded-full border border-white/15 bg-white/10 px-3 py-2 text-right text-xs text-slate-200">
+              <div className="uppercase tracking-[0.22em] text-slate-400">Progress</div>
+              <div className="mt-1 text-lg font-semibold text-white">{Math.round(calorieProgress)}%</div>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                {inRange ? 'In range' : isOver ? 'Over target' : 'Below target'}
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                {remainingToFloor > 0 ? `${formatCalories(remainingToFloor)} to floor` : 'Floor cleared'}
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                {remainingToCeiling > 0 ? `${formatCalories(remainingToCeiling)} left to ceiling` : 'Ceiling reached'}
-              </span>
-            </div>
-            <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Macros</div>
-              <div className="mt-2 grid grid-cols-3 gap-2 text-sm sm:text-base">
-                <div>
-                  <div className="text-slate-400">Protein</div>
-                  <div className="font-semibold text-white">{formatMacro(totalMacros.protein)}</div>
-                </div>
-                <div>
-                  <div className="text-slate-400">Carbs</div>
-                  <div className="font-semibold text-white">{formatMacro(totalMacros.carbs)}</div>
-                </div>
-                <div>
-                  <div className="text-slate-400">Fat</div>
-                  <div className="font-semibold text-white">{formatMacro(totalMacros.fat)}</div>
-                </div>
-              </div>
-            </div>
+          </div>
+          <div className="relative mt-5 h-2 overflow-hidden rounded-full bg-white/10">
+            <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-300 to-emerald-300" style={{ width: `${calorieProgress}%` }} />
           </div>
         </div>
 
-        {notice ? (
-          <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-sm text-slate-200">
-            {notice}
+        <div className="rounded-[1.5rem] border border-rose-200/20 bg-gradient-to-br from-rose-100/8 via-white/6 to-violet-100/8 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+          <div className="text-[0.72rem] uppercase tracking-[0.28em] text-slate-400">Macros from resolved items</div>
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            {[
+              { label: 'Protein', value: resolvedTotals.protein, accent: 'from-emerald-400/25 to-emerald-300/5' },
+              { label: 'Carbs', value: resolvedTotals.carbs, accent: 'from-amber-400/25 to-amber-300/5' },
+              { label: 'Fat', value: resolvedTotals.fat, accent: 'from-fuchsia-400/25 to-fuchsia-300/5' },
+            ].map((macro) => (
+              <div key={macro.label} className={`rounded-2xl border border-white/10 bg-gradient-to-b ${macro.accent} p-4 text-center shadow-sm`}>
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-300">{macro.label}</div>
+                <div className="mt-2 text-2xl font-semibold text-white">{formatMacro(macro.value)}</div>
+              </div>
+            ))}
           </div>
-        ) : null}
-      </header>
-
-      <section className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.75fr)]">
-        <div className="space-y-5">
-          <section className="rounded-[2rem] border border-white/10 bg-white/5 p-4 shadow-soft backdrop-blur-xl sm:p-5">
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                <h2 className="font-[family-name:var(--font-space-grotesk)] text-xl font-semibold text-white">Choose time of day</h2>
-              </div>
-                <div className="w-fit rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
-                Auto: {getTimeOfDayBucket(getAutoTimeOfDay()).label}
-              </div>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {timeOfDayBuckets.map((bucket) => {
-                const isActive = selectedBucket === bucket.key;
-
-                return (
-                  <button
-                    key={bucket.key}
-                    type="button"
-                    onClick={() => setSelectedBucket(bucket.key)}
-                    className={`rounded-3xl border px-4 py-4 text-left transition ${
-                      isActive
-                        ? 'border-cyan-300/40 bg-cyan-400/15 text-white shadow-lg shadow-cyan-400/10'
-                        : 'border-white/10 bg-slate-950/60 text-slate-300 hover:border-cyan-400/30 hover:bg-white/5 hover:text-white'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-medium">{bucket.label}</div>
-                        <div className="mt-1 text-xs text-slate-400">{bucket.helper}</div>
-                      </div>
-                      <div className="rounded-full border border-white/10 bg-black/20 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-400">
-                        {bucket.hours[0]}-{bucket.hours[1]}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="rounded-[2rem] border border-white/10 bg-white/5 p-4 shadow-soft backdrop-blur-xl sm:p-5">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <h2 className="font-[family-name:var(--font-space-grotesk)] text-xl font-semibold text-white">Recommended next</h2>
-              </div>
-              <div className="w-fit rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
-                {remainingToCeiling > 0 ? `${formatCalories(remainingToCeiling)} left` : 'Budget met'}
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3">
-              {parsedRecommendation ? (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await saveParsedCustomLog(parsedRecommendation);
-                  }}
-                  disabled={Boolean(pendingLabel)}
-                  className="rounded-3xl border border-emerald-300/40 bg-emerald-400/15 px-4 py-4 text-left transition hover:-translate-y-0.5 hover:bg-emerald-400/20 disabled:cursor-not-allowed disabled:opacity-60 sm:col-span-3"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-xs font-medium uppercase tracking-[0.22em] text-emerald-100/80">Parsed match</div>
-                      <div className="mt-1 font-medium text-white">{parsedRecommendation.itemName}</div>
-                      <div className="mt-1 text-xs leading-5 text-emerald-50/80">Tap to log this one-off item now.</div>
-                    </div>
-                    <div className="shrink-0 rounded-full border border-emerald-200/30 bg-emerald-300/15 px-2.5 py-1 text-xs font-semibold text-emerald-50">
-                      {formatCalories(parsedRecommendation.calories)}
-                    </div>
-                  </div>
-                </button>
-              ) : null}
-
-              {recommendedMeals.map((item, index) => {
-                const isTopPick = index === 0;
-
-                return (
-                  <button
-                    key={`${item.name}-recommended`}
-                    type="button"
-                    onClick={() => handleQuickAdd(item.name)}
-                    disabled={Boolean(pendingLabel)}
-                    className={`rounded-3xl border px-4 py-4 text-left transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 ${
-                      isTopPick
-                        ? 'border-cyan-300/40 bg-cyan-400/15 shadow-lg shadow-cyan-400/10'
-                        : 'border-white/10 bg-slate-950/60 hover:border-cyan-400/30 hover:bg-white/5'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-xs font-medium uppercase tracking-[0.22em] text-slate-400">
-                          {isTopPick ? 'Top pick' : 'Also fits'}
-                        </div>
-                        <div className="mt-1 font-medium text-white">{item.name}</div>
-                        <div className="mt-1 text-xs leading-5 text-slate-400">{item.default_portion}</div>
-                      </div>
-                      <div className="shrink-0 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-xs font-semibold text-cyan-100">
-                        {formatCalories(item.calories)}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="rounded-[2rem] border border-white/10 bg-white/5 p-4 shadow-soft backdrop-blur-xl sm:p-5">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="font-[family-name:var(--font-space-grotesk)] text-xl font-semibold text-white">{activeBucket.label} quick-add</h2>
-              </div>
-              <div className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
-                {activeMeals.length} options
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {activeMeals.map((item) => {
-                const isActive = pendingLabel === item.name;
-
-                return (
-                  <button
-                    key={item.name}
-                    type="button"
-                    onClick={() => handleQuickAdd(item.name)}
-                    disabled={Boolean(pendingLabel) && !isActive}
-                    className="group flex min-h-[98px] flex-col justify-between rounded-3xl border border-white/10 bg-slate-950/70 p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:border-cyan-400/35 hover:bg-slate-900/95 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-medium text-white transition group-hover:text-cyan-100">{item.name}</div>
-                        <div className="mt-1 text-xs leading-5 text-slate-400">{item.default_portion}</div>
-                      </div>
-                      <div className="shrink-0 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-xs font-semibold text-cyan-100">
-                        {formatCalories(item.calories)}
-                      </div>
-                    </div>
-                    <div className="mt-4 flex items-center justify-between text-xs uppercase tracking-[0.18em] text-slate-500">
-                      <span>{item.category}</span>
-                      <span>{isActive ? 'Adding...' : 'Tap to add'}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
+          <div className="mt-4 text-sm text-slate-400">Macros update from resolved food items only, so they stay consistent with the entries Gemini has broken down.</div>
         </div>
-
-        <aside className="space-y-5 lg:sticky lg:top-5 lg:self-start">
-          <section className="rounded-[2rem] border border-white/10 bg-white/5 p-4 shadow-soft backdrop-blur-xl sm:p-5">
-            <div className="mb-4">
-              <h2 className="font-[family-name:var(--font-space-grotesk)] text-xl font-semibold text-white">One-off item</h2>
-            </div>
-
-            {!('error' in parsedPlainText) ? (
-              <div className="mb-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-50">
-                <div className="text-xs uppercase tracking-[0.18em] text-emerald-100/80">Parsed preview</div>
-                <div className="mt-1 font-medium">{parsedPlainText.itemName}</div>
-                <div className="mt-1 text-emerald-100/90">{formatCalories(parsedPlainText.calories)} kcal</div>
-                <button
-                  type="button"
-                  onClick={() => saveParsedCustomLog(parsedPlainText)}
-                  disabled={Boolean(pendingLabel)}
-                  className="mt-3 inline-flex items-center justify-center rounded-full border border-emerald-200/30 bg-emerald-300/15 px-3 py-1.5 text-xs font-semibold text-emerald-50 transition hover:bg-emerald-300/25 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {pendingLabel === 'custom' ? 'Adding item...' : 'Add now'}
-                </button>
-              </div>
-            ) : plainTextItem.trim() ? (
-              <div className="mb-4 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-300">
-                {parsedPlainText.error}
-              </div>
-            ) : null}
-
-            <form onSubmit={handleCustomSubmit} className="space-y-3">
-              <label className="block space-y-2">
-                <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">Item text</span>
-                <input
-                  value={plainTextItem}
-                  onChange={(event) => setPlainTextItem(event.target.value)}
-                  placeholder="e.g. maggi 350 or 2 eggs 210"
-                  className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20"
-                />
-              </label>
-
-              {catalogSuggestions.length > 0 ? (
-                <div className="space-y-2">
-                  <div className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">Suggestions</div>
-                  <div className="grid gap-2">
-                    {catalogSuggestions.map((item) => (
-                      <button
-                        key={item.name}
-                        type="button"
-                        onClick={() => {
-                          setPlainTextItem(item.name);
-                          setPlainTextCalories(String(item.calories));
-                          setNotice(`Matched ${item.name}. You can edit calories before saving.`);
-                        }}
-                        className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-left transition hover:border-cyan-400/35 hover:bg-white/5"
-                      >
-                        <div>
-                          <div className="font-medium text-white">{item.name}</div>
-                          <div className="text-xs text-slate-400">{item.default_portion}</div>
-                        </div>
-                        <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-xs font-semibold text-cyan-100">
-                          {formatCalories(item.calories)}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              <label className="block space-y-2">
-                <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">Calories, if not in text</span>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={plainTextCalories}
-                  onChange={(event) => setPlainTextCalories(event.target.value)}
-                  placeholder="320"
-                  className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20"
-                />
-              </label>
-
-              <button
-                type="submit"
-                disabled={pendingLabel === 'custom'}
-                className="mt-2 inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {pendingLabel === 'custom' ? 'Adding item...' : 'Add off-menu item'}
-              </button>
-            </form>
-          </section>
-
-          <section className="rounded-[2rem] border border-white/10 bg-white/5 p-4 shadow-soft backdrop-blur-xl sm:p-5">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="font-[family-name:var(--font-space-grotesk)] text-xl font-semibold text-white">Day log</h2>
-                <p className="mt-1 text-sm text-slate-400">View, add, or edit entries for any stored date.</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(event) => setDateSelection(event.target.value || todayKey, event.target.value === todayKey)}
-                  className="rounded-full border border-white/10 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none transition focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20"
-                />
-                <button
-                  type="button"
-                  onClick={() => setDateSelection(todayKey, true)}
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-300 transition hover:border-cyan-400/30 hover:bg-white/10 hover:text-white"
-                >
-                  Today
-                </button>
-              </div>
-            </div>
-
-            <div className="mb-4 flex flex-col gap-2 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-300 sm:flex-row sm:items-center sm:justify-between">
-              <span className="min-w-0">{selectedDayLabel}</span>
-              <span className="w-fit">{selectedDayLogs.length} entries</span>
-            </div>
-
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <h3 className="min-w-0 font-[family-name:var(--font-space-grotesk)] text-lg font-semibold text-white">
-                {selectedDate === todayKey ? 'Today' : formatDateKeyLabel(selectedDate)} summary
-              </h3>
-              <span className="w-fit rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
-                {selectedDayLogs.length} entries
-              </span>
-            </div>
-
-            {selectedDayLogs.length > 0 ? (
-              <div className="space-y-2">
-                {selectedDayLogs.map((log) => {
-                  const label = getFoodName(log);
-                  const calories = log.food?.calories ?? log.custom_calories ?? 0;
-                  const isEditing = editingLogId === log.id;
-
-                  return (
-                    <article key={log.id} className="rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3">
-                      {isEditing && editDraft ? (
-                        <div className="space-y-3">
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <label className="block space-y-2 md:col-span-2">
-                              <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">Food name</span>
-                              <input
-                                value={editDraft.label}
-                                onChange={(event) => setEditDraft((current) => (current ? { ...current, label: event.target.value } : current))}
-                                className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20"
-                              />
-                            </label>
-
-                            <label className="block space-y-2">
-                              <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">Calories</span>
-                              <input
-                                type="number"
-                                min="1"
-                                step="1"
-                                value={editDraft.calories}
-                                onChange={(event) => setEditDraft((current) => (current ? { ...current, calories: event.target.value } : current))}
-                                className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20"
-                              />
-                            </label>
-
-                            <label className="block space-y-2">
-                              <span className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">Date and time</span>
-                              <input
-                                type="datetime-local"
-                                value={editDraft.timestamp}
-                                onChange={(event) => setEditDraft((current) => (current ? { ...current, timestamp: event.target.value } : current))}
-                                className="w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-400/50 focus:ring-2 focus:ring-cyan-400/20"
-                              />
-                            </label>
-                          </div>
-
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="text-xs text-slate-500">Exact catalog matches stay catalog-backed; any other edit becomes a custom entry.</div>
-                            <div className="flex gap-2">
-                              <button
-                                type="button"
-                                onClick={cancelEdit}
-                                className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => saveEditedLog(log.id)}
-                                disabled={pendingLabel === `edit-${log.id}`}
-                                className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {pendingLabel === `edit-${log.id}` ? 'Saving...' : 'Save'}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="min-w-0">
-                            <div className="truncate font-medium text-white">{label}</div>
-                            <div className="mt-1 text-sm text-slate-400">{log.food?.default_portion ?? 'Manual calorie entry'}</div>
-                            <div className="mt-2 text-xs text-slate-500">{formatTime(log.timestamp)}</div>
-                          </div>
-                          <div className="flex shrink-0 flex-col items-end gap-2">
-                            <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-sm font-semibold text-cyan-100">
-                              {formatCalories(calories)} kcal
-                            </div>
-                            <div className="flex flex-wrap justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => beginEdit(log)}
-                                disabled={Boolean(pendingLabel)}
-                                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300 transition hover:border-cyan-400/30 hover:bg-cyan-400/10 hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDelete(log.id)}
-                                disabled={pendingLabel === `delete-${log.id}`}
-                                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300 transition hover:border-rose-400/30 hover:bg-rose-400/10 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {pendingLabel === `delete-${log.id}` ? 'Removing...' : 'Delete'}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </article>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-dashed border-white/10 bg-slate-950/60 px-4 py-10 text-center text-sm text-slate-400">
-                No entries yet for this date. Add one from the quick-add cards or switch to another day.
-              </div>
-            )}
-          </section>
-        </aside>
       </section>
+
+      <section className="mt-4">
+        <h3 className="mb-2 font-medium">Quick Add — {labelTimeSlot(timeOfDay)}</h3>
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <label className="text-sm text-slate-300">
+            Time of day
+            <select
+              value={timeOfDay}
+              onChange={(e) => setTimeOfDay(e.target.value)}
+              className={`ml-2 ${surfaceInputClass}`}
+            >
+              <option value="morning">Morning</option>
+              <option value="afternoon">Afternoon</option>
+              <option value="evening">Evening</option>
+              <option value="night">Night</option>
+            </select>
+          </label>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {topPicks.map((p) => (
+            <button key={p.display_name} className={pastelChipClass} onClick={() => handleAddPending(p.display_name)}>
+              {p.display_name} +
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-4">
+        <form
+          onSubmit={async (e: FormEvent) => {
+            e.preventDefault();
+            if (!searchQuery.trim()) return;
+            if (searchResults.length === 1) {
+              await handleSelectSearchResult(searchResults[0]);
+            } else {
+              await handleAddPending(searchQuery.trim());
+            }
+            setSearchQuery("");
+            setSearchResults([]);
+          }}
+          className="flex gap-2"
+        >
+          <input
+            placeholder="What did you eat? e.g. 3 boiled eggs and 2 egg whites"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className={`flex-1 ${surfaceInputClass}`}
+            onFocus={() => setShowDropdown(true)}
+          />
+          <button className={pastelAddButtonClass}>Add</button>
+        </form>
+
+        {showDropdown && searchResults.length > 0 && (
+          <div className="mt-2 rounded-2xl border border-sky-200/15 bg-slate-950/90 p-2 shadow-[0_12px_30px_rgba(0,0,0,0.25)]">
+            {searchResults.map((r) => (
+              <div key={r.id} className="flex items-center justify-between rounded-xl px-3 py-2 transition hover:bg-white/5">
+                <div className="text-slate-100">
+                  {r.name} — {Math.round(r.calories)} kcal
+                </div>
+                <button className="ml-2 rounded-full border border-sky-200/20 bg-sky-100/10 px-3 py-1 text-sky-50 transition hover:bg-sky-100/20" onClick={() => handleSelectSearchResult(r)}>
+                  Add
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="mt-6">
+        <ul className="space-y-2">
+          {selectedDayLogs.map((log) => (
+            <li key={log.id} className="flex items-center justify-between rounded-[1.25rem] border border-white/10 bg-gradient-to-r from-white/8 via-sky-100/5 to-violet-100/5 p-3 shadow-[0_10px_30px_rgba(0,0,0,0.16)] backdrop-blur">
+              <div>
+                <div className="font-medium">{log.display_name}</div>
+                <div className={mealTagClass}>{labelTimeSlot(getLogMealSlot(log))}</div>
+                {log.quantity ? <div className="text-xs text-slate-500">Qty: {log.quantity}</div> : null}
+              </div>
+              <div className="flex items-center gap-3">
+                  <div className="text-sm">{log.status === "pending" ? "pending" : `${Math.round(log.calories ?? 0)} kcal`}</div>
+                  {log.status === 'resolved' ? (
+                    <div className="text-xs text-slate-400">
+                      P {formatMacro(log.protein ?? 0)} C {formatMacro(log.carbs ?? 0)} F {formatMacro(log.fat ?? 0)}
+                    </div>
+                  ) : null}
+                <div className={log.status === 'pending' ? 'text-slate-300' : 'text-emerald-200'} aria-hidden="true">
+                  {log.status === 'pending' ? <FiClock className="h-4 w-4" /> : <FiCheckCircle className="h-4 w-4" />}
+                </div>
+                  {log.status === 'resolved' ? (
+                  <button
+                    type="button"
+                    aria-label="Save food to database"
+                      title={heartedLogs[log.id] ? 'Unsave from foods' : 'Save to foods'}
+                      className={`${pastelHeartButtonClass} ${heartedLogs[log.id] ? 'border-rose-300/45 bg-rose-200/30 text-rose-300 shadow-sm shadow-rose-950/10' : ''}`}
+                      disabled={pendingKey === `heart-${log.id}`}
+                      onClick={() => handleHeart(log)}
+                  >
+                    <FiHeart className="h-4 w-4" />
+                  </button>
+                ) : null}
+                <button className={pastelDeleteButtonClass} onClick={() => handleDelete(log.id)} disabled={pendingKey === `del-${log.id}`}>
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {insight && (
+        <section className="mt-6 rounded-[1.5rem] border border-amber-200/15 bg-gradient-to-br from-amber-100/8 via-slate-950 to-rose-100/8 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.2)]">
+          <h4 className="font-semibold text-white">Today's Nutrition Report</h4>
+          <div className="mt-2 text-sm">
+            <div className="rounded-xl bg-emerald-100/8 px-3 py-2 text-emerald-50">🏆 Best choice: {insight.best_choice ?? "—"}</div>
+            <div className="mt-2 rounded-xl bg-amber-100/8 px-3 py-2 text-amber-50">⚠️ Could skip: {insight.skip_suggestion ?? "—"}</div>
+            <div className="mt-2 rounded-xl bg-sky-100/8 px-3 py-2 text-sky-50">📊 Intake: {insight.intake_assessment ?? "—"}</div>
+          </div>
+        </section>
+      )}
+
+      {/* Minimal, informative session summary */}
+      <div className="mt-4 rounded-xl border border-white/6 bg-white/4 px-4 py-3 text-xs text-slate-300 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <strong>Saved:</strong> {Object.values(heartedLogs).filter(Boolean).length} •
+          <strong className="ml-2">Entries:</strong> {selectedDayLogs.length} ({selectedDayLogs.filter((l) => l.status === 'resolved').length} done, {pendingCount} pending) •
+          <strong className="ml-2">Total:</strong> {Math.round(totalCalories)} kcal
+        </div>
+        <div className="text-slate-400">
+          {insight ? (
+            <span>Best: {insight.best_choice ?? '—'} · Skip: {insight.skip_suggestion ?? '—'} · {insight.intake_assessment ?? ''}</span>
+          ) : (
+            <span>Tip: click ♥ to save a food — saved items improve recommendations.</span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
