@@ -353,12 +353,12 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl p-4">
-      <div className="flex items-center justify-between gap-4">
+    <div className="mx-auto w-full max-w-3xl px-3 pb-24 pt-4 sm:px-4 sm:pb-10">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div>
           <h2 className="text-lg font-semibold">{selectedDate === todayKey ? "Today's log" : `${formatDateKeyLabel(selectedDate)} log`}</h2>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             aria-label="Select date"
             type="date"
@@ -369,7 +369,7 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
             }}
             className={surfaceInputClass}
           />
-          <button className={syncButtonClass} disabled={isSyncing || selectedDayLogs.length === 0} onClick={handleSync}>
+          <button className={`${syncButtonClass} w-full sm:w-auto`} disabled={isSyncing || selectedDayLogs.length === 0} onClick={handleSync}>
             {isSyncing ? "Syncing…" : "⚡ Sync & Analyse Day"}
           </button>
         </div>
@@ -378,13 +378,13 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
       <section className="mt-4 grid gap-3 lg:grid-cols-[1.05fr_0.95fr]">
         <div className="relative overflow-hidden rounded-[1.5rem] border border-sky-200/25 bg-gradient-to-br from-sky-300/18 via-slate-950 to-slate-900 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(186,230,253,0.16),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(167,243,208,0.12),transparent_28%)]" />
-          <div className="relative flex items-start justify-between gap-4">
+          <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="text-[0.72rem] uppercase tracking-[0.28em] text-cyan-100/70">Today&apos;s calories</div>
-              <div className="mt-2 text-4xl font-semibold tracking-tight text-white">{Math.round(totalCalories)} kcal</div>
+              <div className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">{Math.round(totalCalories)} kcal</div>
               <div className="mt-2 text-sm text-cyan-100/80">Target window {targetLabel}</div>
             </div>
-            <div className="rounded-full border border-white/15 bg-white/10 px-3 py-2 text-right text-xs text-slate-200">
+            <div className="rounded-full border border-white/15 bg-white/10 px-3 py-2 text-center text-xs text-slate-200 sm:text-right">
               <div className="uppercase tracking-[0.22em] text-slate-400">Progress</div>
               <div className="mt-1 text-lg font-semibold text-white">{Math.round(calorieProgress)}%</div>
             </div>
@@ -396,7 +396,7 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
 
         <div className="rounded-[1.5rem] border border-rose-200/20 bg-gradient-to-br from-rose-100/8 via-white/6 to-violet-100/8 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.22)] backdrop-blur-xl">
           <div className="text-[0.72rem] uppercase tracking-[0.28em] text-slate-400">Macros from resolved items</div>
-          <div className="mt-4 grid grid-cols-3 gap-3">
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[
               { label: 'Protein', value: resolvedTotals.protein, accent: 'from-emerald-400/25 to-emerald-300/5' },
               { label: 'Carbs', value: resolvedTotals.carbs, accent: 'from-amber-400/25 to-amber-300/5' },
@@ -431,7 +431,7 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
         </div>
         <div className="flex flex-wrap gap-2">
           {topPicks.map((p) => (
-            <button key={p.display_name} className={pastelChipClass} onClick={() => handleAddPending(p.display_name)}>
+            <button key={p.display_name} className={`${pastelChipClass} min-h-10`} onClick={() => handleAddPending(p.display_name)}>
               {p.display_name} +
             </button>
           ))}
@@ -451,26 +451,26 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
             setSearchQuery("");
             setSearchResults([]);
           }}
-          className="flex gap-2"
+          className="flex flex-col gap-2 sm:flex-row"
         >
           <input
             placeholder="What did you eat? e.g. 3 boiled eggs and 2 egg whites"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className={`flex-1 ${surfaceInputClass}`}
+            className={`w-full flex-1 ${surfaceInputClass}`}
             onFocus={() => setShowDropdown(true)}
           />
-          <button className={pastelAddButtonClass}>Add</button>
+          <button className={`${pastelAddButtonClass} w-full sm:w-auto`}>Add</button>
         </form>
 
         {showDropdown && searchResults.length > 0 && (
           <div className="mt-2 rounded-2xl border border-sky-200/15 bg-slate-950/90 p-2 shadow-[0_12px_30px_rgba(0,0,0,0.25)]">
             {searchResults.map((r) => (
-              <div key={r.id} className="flex items-center justify-between rounded-xl px-3 py-2 transition hover:bg-white/5">
-                <div className="text-slate-100">
+              <div key={r.id} className="flex flex-col gap-2 rounded-xl px-3 py-2 transition hover:bg-white/5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="break-words text-slate-100">
                   {r.name} — {Math.round(r.calories)} kcal
                 </div>
-                <button className="ml-2 rounded-full border border-sky-200/20 bg-sky-100/10 px-3 py-1 text-sky-50 transition hover:bg-sky-100/20" onClick={() => handleSelectSearchResult(r)}>
+                <button className="rounded-full border border-sky-200/20 bg-sky-100/10 px-3 py-1 text-sky-50 transition hover:bg-sky-100/20 sm:ml-2" onClick={() => handleSelectSearchResult(r)}>
                   Add
                 </button>
               </div>
@@ -482,16 +482,16 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
       <section className="mt-6">
         <ul className="space-y-2">
           {selectedDayLogs.map((log) => (
-            <li key={log.id} className="flex items-center justify-between rounded-[1.25rem] border border-white/10 bg-gradient-to-r from-white/8 via-sky-100/5 to-violet-100/5 p-3 shadow-[0_10px_30px_rgba(0,0,0,0.16)] backdrop-blur">
-              <div>
-                <div className="font-medium">{log.display_name}</div>
+            <li key={log.id} className="flex flex-col gap-3 rounded-[1.25rem] border border-white/10 bg-gradient-to-r from-white/8 via-sky-100/5 to-violet-100/5 p-3 shadow-[0_10px_30px_rgba(0,0,0,0.16)] backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="break-words font-medium">{log.display_name}</div>
                 <div className={mealTagClass}>{labelTimeSlot(getLogMealSlot(log))}</div>
                 {log.quantity ? <div className="text-xs text-slate-500">Qty: {log.quantity}</div> : null}
               </div>
-              <div className="flex items-center gap-3">
-                  <div className="text-sm">{log.status === "pending" ? "pending" : `${Math.round(log.calories ?? 0)} kcal`}</div>
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                  <div className="text-sm whitespace-nowrap">{log.status === "pending" ? "pending" : `${Math.round(log.calories ?? 0)} kcal`}</div>
                   {log.status === 'resolved' ? (
-                    <div className="text-xs text-slate-400">
+                    <div className="text-xs text-slate-400 sm:text-right">
                       P {formatMacro(log.protein ?? 0)} C {formatMacro(log.carbs ?? 0)} F {formatMacro(log.fat ?? 0)}
                     </div>
                   ) : null}
@@ -510,7 +510,7 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
                     <FiHeart className="h-4 w-4" />
                   </button>
                 ) : null}
-                <button className={pastelDeleteButtonClass} onClick={() => handleDelete(log.id)} disabled={pendingKey === `del-${log.id}`}>
+                <button className={`${pastelDeleteButtonClass} whitespace-nowrap`} onClick={() => handleDelete(log.id)} disabled={pendingKey === `del-${log.id}`}>
                   Delete
                 </button>
               </div>
@@ -531,13 +531,13 @@ export function CalorieDashboard({ initialLogs, initialInsight = null, canPersis
       )}
 
       {/* Minimal, informative session summary */}
-      <div className="mt-4 rounded-xl border border-white/6 bg-white/4 px-4 py-3 text-xs text-slate-300 flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="mt-4 rounded-xl border border-white/6 bg-white/4 px-4 py-3 text-xs text-slate-300 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="leading-5">
           <strong>Saved:</strong> {Object.values(heartedLogs).filter(Boolean).length} •
           <strong className="ml-2">Entries:</strong> {selectedDayLogs.length} ({selectedDayLogs.filter((l) => l.status === 'resolved').length} done, {pendingCount} pending) •
           <strong className="ml-2">Total:</strong> {Math.round(totalCalories)} kcal
         </div>
-        <div className="text-slate-400">
+        <div className="text-slate-400 leading-5">
           {insight ? (
             <span>Best: {insight.best_choice ?? '—'} · Skip: {insight.skip_suggestion ?? '—'} · {insight.intake_assessment ?? ''}</span>
           ) : (
