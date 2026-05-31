@@ -253,57 +253,6 @@ export function CalorieDashboard({
     setPendingKey(null);
   }
 
-  async function handleAddAndSync() {
-    const title = foodTitle.trim();
-    if (!title) return;
-
-    setSyncError(null);
-    setSyncMessage(null);
-    await handleAddPending(title, recipeInput.trim() || null);
-    setFoodTitle("");
-
-    if (!canPersist) return;
-
-    setIsSyncing(true);
-    try {
-      const res = await syncDayWithGemini(selectedDate, timeOfDay);
-      setLogs((current) => {
-        const other = current.filter((l) => new Date(l.logged_at).toLocaleDateString("en-CA") !== selectedDate);
-        return [...(res.logs || []), ...other];
-      });
-      setInsight(res.insight ?? null);
-      setSyncMessage('Saved and analysed with Gemini.');
-    } catch (err: any) {
-      console.error(err);
-      setSyncError(err?.message || 'Gemini sync failed. Check the server logs and configuration.');
-    } finally {
-      setIsSyncing(false);
-    }
-  }
-
-  async function handleQuickAddAndSync(title: string) {
-    setFoodTitle(title);
-    await handleAddPending(title, recipeInput.trim() || null);
-
-    if (!canPersist) return;
-
-    setIsSyncing(true);
-    try {
-      const res = await syncDayWithGemini(selectedDate, timeOfDay);
-      setLogs((current) => {
-        const other = current.filter((l) => new Date(l.logged_at).toLocaleDateString("en-CA") !== selectedDate);
-        return [...(res.logs || []), ...other];
-      });
-      setInsight(res.insight ?? null);
-      setSyncMessage('Saved and analysed with Gemini.');
-    } catch (err: any) {
-      console.error(err);
-      setSyncError(err?.message || 'Gemini sync failed. Check the server logs and configuration.');
-    } finally {
-      setIsSyncing(false);
-    }
-  }
-
   function parseQuantityAndName(input: string): { quantity?: string | null; name: string } {
     const trimmed = (input || '').trim();
     // match patterns like "3 boiled eggs", "2x boiled eggs", "1.5 cups oats"
@@ -494,7 +443,7 @@ export function CalorieDashboard({
         </div>
         <div className="flex flex-wrap gap-2">
           {topPicks.map((p) => (
-            <button key={p.display_name} className={`${pastelChipClass} min-h-10`} onClick={() => handleQuickAddAndSync(p.display_name)}>
+            <button key={p.display_name} className={`${pastelChipClass} min-h-10`} onClick={() => handleAddPending(p.display_name, recipeInput.trim() || null)}>
               {p.display_name} +
             </button>
           ))}
@@ -505,7 +454,11 @@ export function CalorieDashboard({
         <form
           onSubmit={async (e: FormEvent) => {
             e.preventDefault();
-              await handleAddAndSync();
+              const title = foodTitle.trim();
+              if (!title) return;
+              await handleAddPending(title, recipeInput.trim() || null);
+              setFoodTitle("");
+              setRecipeInput("");
           }}
           className="flex flex-col gap-2"
         >
@@ -516,7 +469,7 @@ export function CalorieDashboard({
                 onChange={(e) => setFoodTitle(e.target.value)}
               className={`w-full flex-1 ${surfaceInputClass}`}
             />
-              <button className={`${pastelAddButtonClass} w-full sm:w-auto`} disabled={isSyncing || !foodTitle.trim()}>{isSyncing ? 'Saving…' : 'Add & Analyse'}</button>
+              <button className={`${pastelAddButtonClass} w-full sm:w-auto`} disabled={isSyncing || !foodTitle.trim()}>{isSyncing ? 'Saving…' : 'Add'}</button>
           </div>
           <textarea
             placeholder="Optional recipe/ingredients with amounts, e.g. 3 eggs, 1 tsp ghee, 30g onion"
