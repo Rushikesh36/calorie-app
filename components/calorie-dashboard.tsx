@@ -354,18 +354,17 @@ export function CalorieDashboard({
     setSyncError(null);
     setSyncMessage(null);
     try {
+      const logCount = selectedDayLogs.length;
       const res = await syncDayWithGemini(selectedDate, timeOfDay);
       setLogs((current) => {
         const other = current.filter((l) => new Date(l.logged_at).toLocaleDateString("en-CA") !== selectedDate);
         return [...(res.logs || []), ...other];
       });
       setInsight(res.insight ?? null);
-      const resolvedCount = (res.logs || []).filter((log) => log.status === 'resolved').length;
-      const pendingCount = (res.logs || []).filter((log) => log.status === 'pending').length;
       setSyncMessage(
-        resolvedCount === 0 && pendingCount === 0
-          ? 'Sync finished, but there were no entries to analyse for that day.'
-          : `Synced ${resolvedCount + pendingCount} log${resolvedCount + pendingCount === 1 ? '' : 's'} for ${selectedDate}.`,
+        logCount === 0
+          ? 'No entries were found for that day, but Gemini still analysed the empty log.'
+          : `Synced ${logCount} log${logCount === 1 ? '' : 's'} for ${selectedDate}.`,
       );
     } catch (err: any) {
       console.error(err);
@@ -392,7 +391,7 @@ export function CalorieDashboard({
             }}
             className={surfaceInputClass}
           />
-          <button className={`${syncButtonClass} w-full sm:w-auto`} disabled={isSyncing || selectedDayLogs.length === 0} onClick={handleSync}>
+          <button className={`${syncButtonClass} w-full sm:w-auto`} disabled={isSyncing} onClick={handleSync}>
             {isSyncing ? "Syncing…" : "⚡ Sync & Analyse Day"}
           </button>
         </div>
