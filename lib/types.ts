@@ -49,5 +49,6 @@ export interface WeightLog {
 export interface TopPick {
   display_name: string;
   raw_input: string;
+  description: string | null;
   count: number;
 }

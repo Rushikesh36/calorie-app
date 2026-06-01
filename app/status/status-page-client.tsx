@@ -168,7 +168,7 @@ export default function StatusPageClient({ loading = false }: StatusPageClientPr
     : [];
 
   const bestDay = groupedDays.reduce(
-    (top, day) => (day.calories > top.calories ? day : top),
+    (top, day) => (day.calories < top.calories ? day : top),
     { label: 'No data', calories: 0, entries: 0, inRange: false },
   );
   const topFoods: { name: string; calories: number; count: number }[] = buildTopFoods(logs);

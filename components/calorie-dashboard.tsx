@@ -584,7 +584,14 @@ export function CalorieDashboard({
         </div>
         <div className="flex flex-wrap gap-2">
           {topPicks.map((p) => (
-            <button key={p.display_name} className={`${pastelChipClass} min-h-10`} onClick={() => handleAddPending(p.display_name, recipeInput.trim() || null)}>
+            <button
+              key={p.display_name}
+              className={`${pastelChipClass} min-h-10`}
+              onClick={() => {
+                const description = p.description?.trim() || p.raw_input?.trim() || recipeInput.trim() || null;
+                handleAddPending(p.display_name, description);
+              }}
+            >
               {p.display_name} +
             </button>
           ))}

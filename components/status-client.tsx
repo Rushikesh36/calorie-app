@@ -184,7 +184,7 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
   const uniqueDays = useMemo(() => new Set(logs.map((l) => dayKeyLocal(l.logged_at))).size || (windowDatesParsed?.length ?? 1), [logs, windowDatesParsed]);
   const averagePerDay = uniqueDays > 0 ? totalCalories / uniqueDays : 0;
   const inRangeDays = useMemo(() => (groupedDays.length > 0 ? groupedDays.filter((d) => d.inRange).length : 0), [groupedDays]);
-  const bestDay = groupedDays.reduce((top, day) => (day.calories > top.calories ? day : top), { label: 'No data', calories: 0, entries: 0, inRange: false });
+  const bestDay = groupedDays.reduce((top, day) => (day.calories < top.calories ? day : top), { label: 'No data', calories: 0, entries: 0, inRange: false });
   const topFoods = useMemo(() => {
     const counts = new Map<string, { calories: number; count: number }>();
     for (const log of logs) {
@@ -456,14 +456,14 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
         </div>
       </div>
 
-      <div className="mt-6 rounded-[1.75rem] border border-white/10 bg-gradient-to-br from-slate-950 via-slate-950/95 to-cyan-100/5 p-5 shadow-[0_16px_40px_rgba(0,0,0,0.2)]">
+      <div className="mt-6 rounded-[1.75rem] border border-white/10 bg-gradient-to-br from-slate-950 via-slate-950/95 to-cyan-100/5 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.2)] sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Weight tracking</div>
             <h3 className="mt-2 text-2xl font-semibold text-white">Add your current weight</h3>
             <p className="mt-1 text-sm text-slate-400">Each entry saves with today&apos;s timestamp, then updates the chart below.</p>
           </div>
-          <div className="grid grid-cols-3 gap-2 text-xs sm:text-sm">
+          <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3 sm:text-sm">
             <div className="rounded-2xl border border-rose-200/15 bg-rose-100/10 px-3 py-2 text-rose-100">Red: current weight</div>
             <div className="rounded-2xl border border-cyan-200/15 bg-cyan-100/10 px-3 py-2 text-cyan-100">Blue: benchmark -2kg/month</div>
             <div className="rounded-2xl border border-emerald-200/15 bg-emerald-100/10 px-3 py-2 text-emerald-100">Green: flat 80kg line</div>
@@ -530,11 +530,12 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
           {weightChart.sortedAscending.length === 0 ? (
             <div className="py-8 text-sm text-slate-400">Add at least one weight entry to see the chart.</div>
           ) : (
-            <div className="mt-4 overflow-x-auto">
+            <div className="mt-4 w-full overflow-hidden rounded-[1.25rem] border border-white/5 bg-slate-950/60 p-2 sm:p-3">
               <svg
                 viewBox={`0 0 ${weightChart.chartWidth} ${weightChart.chartHeight}`}
-                className="block"
-                style={{ width: `${weightChart.chartWidth}px`, minWidth: `${weightChart.chartWidth}px`, height: `${weightChart.chartHeight}px` }}
+                  className="block h-auto w-full"
+                  preserveAspectRatio="xMidYMid meet"
+                  style={{ maxWidth: '100%', height: 'auto' }}
               >
                 <line
                   x1={weightChart.margins.left}
@@ -619,7 +620,7 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
             </div>
           )}
 
-          <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
+          <div className="mt-3 flex flex-col gap-2 text-xs text-slate-400 sm:flex-row sm:flex-wrap sm:gap-3">
             <span>Latest: {weightChart.latestWeight ? formatWeight(weightChart.latestWeight) : '—'}</span>
             <span>Benchmark rate: 2 kg/month</span>
             <span>{weightEntries.length} weight logs</span>

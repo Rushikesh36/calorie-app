@@ -213,8 +213,9 @@ export async function getTopPicksForTimeSlot(timeSlot: TimeSlot): Promise<TopPic
 
   const { data, error } = await supabase
     .from('daily_logs')
-    .select('display_name, raw_input, logged_at, food_id, meal_slot')
-    .gte('logged_at', start.toISOString());
+    .select('display_name, raw_input, recipe_details, logged_at, food_id, meal_slot')
+    .gte('logged_at', start.toISOString())
+    .order('logged_at', { ascending: false });
 
   if (error || !data) return [];
 
@@ -222,7 +223,7 @@ export async function getTopPicksForTimeSlot(timeSlot: TimeSlot): Promise<TopPic
   const { data: favFoods } = await supabase.from('foods').select('name').eq('is_favourite', true);
   const favSet = new Set<string>((favFoods || []).map((f: any) => String(f.name).toLowerCase()));
 
-  const counts: Record<string, { display_name: string; raw_input: string; count: number }> = {};
+  const counts: Record<string, { display_name: string; raw_input: string; description: string | null; count: number }> = {};
 
   for (const row of data) {
     const rowSlot = slotAliases[String(row.meal_slot ?? '').toLowerCase()] ?? String(row.meal_slot ?? '').toLowerCase();
@@ -233,12 +234,17 @@ export async function getTopPicksForTimeSlot(timeSlot: TimeSlot): Promise<TopPic
     if (!isFav) continue; // skip non-favourited items
 
     const key = display;
-    counts[key] = counts[key] || { display_name: display, raw_input: row.raw_input, count: 0 };
+    counts[key] = counts[key] || {
+      display_name: display,
+      raw_input: row.raw_input,
+      description: row.recipe_details ?? row.raw_input ?? display,
+      count: 0,
+    };
     counts[key].count += 1;
   }
 
   const picks = Object.values(counts).sort((a, b) => b.count - a.count).slice(0, 3);
-  return picks.map(p => ({ display_name: p.display_name, raw_input: p.raw_input, count: p.count }));
+  return picks.map(p => ({ display_name: p.display_name, raw_input: p.raw_input, description: p.description, count: p.count }));
 }
 
 export async function searchFoodsInDB(query: string): Promise<FoodItem[]> {
