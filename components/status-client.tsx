@@ -3,7 +3,7 @@
 import React, { FormEvent, useEffect, useMemo, useState } from 'react';
 import { FiEdit2, FiPlus, FiTrash2, FiX } from 'react-icons/fi';
 import type { DailyLog, WeightLog } from '@/lib/types';
-import { addWeightLog, deleteWeightLog, updateWeightLog } from '@/app/actions';
+import { addWeightLog, deleteWeightLog, updateWeightLog } from '@/lib/browser-api';
 
 // fallback calorie target when not provided by app settings
 const dailyCalorieTarget = { minimum: 1200, maximum: 2500 };

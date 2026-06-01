@@ -1,20 +1,16 @@
+"use client";
+
 import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { TopNav } from '@/components/top-nav';
-import { getLogsInRange, getWeightLogsInRange } from '@/app/actions';
+import StatusClient from '@/components/status-client';
 import type { DailyLog, WeightLog } from '@/lib/types';
+import { getLogsInRange, getWeightLogsInRange } from '@/lib/browser-api';
 
 const dailyCalorieTarget = { minimum: 1200, maximum: 2500 };
-import StatusClient from '@/components/status-client';
-
-export const dynamic = 'force-dynamic';
 
 type RangeKey = 'week' | 'month' | 'all';
-
-type StatusPageProps = {
-  searchParams?: Promise<{
-    range?: string;
-  }>;
-};
 
 const rangeConfig: Record<RangeKey, { label: string; days: number | null }> = {
   week: { label: 'Last 7 days', days: 7 },
@@ -102,20 +98,55 @@ function buildTopFoods(logs: DailyLog[]) {
     .slice(0, 5);
 }
 
-export default async function StatusPage({ searchParams }: StatusPageProps) {
-  const resolvedSearchParams = await searchParams;
-  const selectedRange = toRangeKey(resolvedSearchParams?.range);
-  const config = rangeConfig[selectedRange];
-  const window = config.days ? createWindow(config.days) : null;
+function LoadingShell() {
+  return (
+    <div className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-soft backdrop-blur-xl">
+      <div className="animate-pulse space-y-4">
+        <div className="h-6 w-52 rounded-full bg-white/10" />
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="h-72 rounded-[1.5rem] bg-white/8" />
+          <div className="h-72 rounded-[1.5rem] bg-white/8" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  const logs: DailyLog[] = window ? await getLogsInRange({ start: window.start, end: window.end }) : await getLogsInRange();
-  const weightLogs: WeightLog[] = window ? await getWeightLogsInRange({ start: window.start, end: window.end }) : await getWeightLogsInRange();
-  // We will render aggregates and labels on the client so they use the user's local timezone.
+export default function StatusPage() {
+  const searchParams = useSearchParams();
+  const selectedRange = toRangeKey(searchParams.get('range') ?? undefined);
+  const config = rangeConfig[selectedRange];
+  const dateWindow = useMemo(() => (config.days ? createWindow(config.days) : null), [config.days]);
+  const [logs, setLogs] = useState<DailyLog[]>([]);
+  const [weightLogs, setWeightLogs] = useState<WeightLog[]>([]);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setReady(false);
+
+    (async () => {
+      const [nextLogs, nextWeightLogs] = await Promise.all([
+        dateWindow ? getLogsInRange({ start: dateWindow.start, end: dateWindow.end }) : getLogsInRange(),
+        dateWindow ? getWeightLogsInRange({ start: dateWindow.start, end: dateWindow.end }) : getWeightLogsInRange(),
+      ]);
+
+      if (!active) return;
+      setLogs(nextLogs);
+      setWeightLogs(nextWeightLogs);
+      setReady(true);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [dateWindow]);
+
   const totalCalories = getDayTotal(logs);
-  const uniqueDays = new Set(logs.map((log) => dayKey(new Date(log.logged_at)))).size || (window?.dates.length ?? 1);
+  const uniqueDays = new Set(logs.map((log) => dayKey(new Date(log.logged_at)))).size || (dateWindow?.dates.length ?? 1);
   const averagePerDay = uniqueDays > 0 ? totalCalories / uniqueDays : 0;
-  const groupedDays = window
-    ? window.dates.map((date) => {
+  const groupedDays = dateWindow
+    ? dateWindow.dates.map((date) => {
         const key = dayKey(date);
         const entries = groupByDay(logs).get(key) ?? [];
         const calories = getDayTotal(entries);
@@ -135,62 +166,46 @@ export default async function StatusPage({ searchParams }: StatusPageProps) {
   );
   const topFoods: { name: string; calories: number; count: number }[] = buildTopFoods(logs);
   const maxBarCalories = Math.max(dailyCalorieTarget.maximum, ...groupedDays.map((day) => day.calories), 1);
-  const totalProgressValue = Math.min((totalCalories / (dailyCalorieTarget.maximum * Math.max(uniqueDays, 1))) * 100, 100);
-  const inRangeDays = window ? groupedDays.filter((d) => d.inRange).length : 0;
+  const inRangeDays = dateWindow ? groupedDays.filter((d) => d.inRange).length : 0;
 
   return (
     <main className="min-h-screen px-4 py-4 sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 pb-10">
         <TopNav active="status" />
 
-        <section className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
-          <div className="rounded-[2rem] border border-white/10 bg-white/5 p-5 shadow-soft backdrop-blur-xl sm:p-6">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="space-y-3">
-                <div className="inline-flex rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-cyan-100">
-                  Weekly and monthly status
-                </div>
-                <div>
-                  <h1 className="font-[family-name:var(--font-space-grotesk)] text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-                    See your progress without squeezing it into the quick-add screen.
-                  </h1>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                    Check how often you stay inside the {formatCalories(dailyCalorieTarget.minimum)} to {formatCalories(dailyCalorieTarget.maximum)} calorie window, how your week is trending, and which foods are driving the total.
-                  </p>
-                </div>
+        {!ready ? (
+          <LoadingShell />
+        ) : (
+          <section className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
+            <div className="rounded-[2rem] border border-white/10 bg-white/5 p-4 shadow-soft backdrop-blur-xl sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-slate-300">{config.label}</div>
+                <div className="text-sm text-slate-300">{formatCalories(totalCalories)} kcal</div>
               </div>
 
-              <div className="w-full max-w-xs rounded-[1.5rem] border border-white/10 bg-slate-950/70 p-4">
-                <div className="flex items-center justify-between text-sm text-slate-400">
-                  <span>{config.label}</span>
-                  <span>{formatCalories(totalCalories)} kcal</span>
-                </div>
+              <div className="mt-5 flex flex-wrap gap-2">
+                {(['week', 'month', 'all'] as const).map((range) => (
+                  <Link
+                    key={range}
+                    href={`/status?range=${range}`}
+                    className={`rounded-full border px-4 py-2 text-sm font-medium transition shadow-sm ${
+                      selectedRange === range
+                        ? 'border-cyan-200/30 bg-cyan-100/15 text-cyan-50'
+                        : 'border-white/10 bg-slate-950/40 text-slate-300 hover:bg-white/8 hover:text-white'
+                    }`}
+                  >
+                    {rangeConfig[range].label}
+                  </Link>
+                ))}
               </div>
             </div>
 
-            <div className="mt-5 flex flex-wrap gap-2">
-              {(['week', 'month', 'all'] as const).map((range) => (
-                <Link
-                  key={range}
-                  href={`/status?range=${range}`}
-                  className={`rounded-full border px-4 py-2 text-sm font-medium transition shadow-sm ${
-                    selectedRange === range
-                      ? 'border-cyan-200/30 bg-cyan-100/15 text-cyan-50'
-                      : 'border-white/10 bg-slate-950/40 text-slate-300 hover:bg-white/8 hover:text-white'
-                  }`}
-                >
-                  {rangeConfig[range].label}
-                </Link>
-              ))}
+            <div className="space-y-5">
+              <StatusClient logs={logs} weightLogs={weightLogs} rangeLabel={config.label} windowDates={dateWindow ? dateWindow.dates.map((d) => d.toISOString()) : null} />
             </div>
+          </section>
+        )}
 
-            {/* Detailed day grouping renders client-side to respect user timezone */}
-          </div>
-
-          <div className="space-y-5">
-            <StatusClient logs={logs} weightLogs={weightLogs} rangeLabel={config.label} windowDates={window ? window.dates.map((d) => d.toISOString()) : null} />
-          </div>
-        </section>
       </div>
     </main>
   );

@@ -16,7 +16,6 @@ export function TopNav({ active }: TopNavProps) {
         <span className="text-[0.65rem] font-semibold uppercase tracking-[0.28em] text-cyan-200/80">
           Calorie tracker
         </span>
-        <span className="text-sm text-slate-400">Fast logging, cleaner status.</span>
       </div>
 
       <div className="flex w-full items-center gap-2 rounded-full border border-white/10 bg-black/20 p-1.5 sm:w-auto">

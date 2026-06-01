@@ -11,7 +11,7 @@ import {
   deleteLog,
   syncDayWithGemini,
   getFavouriteFoodsByNames,
-} from "@/app/actions";
+} from "@/lib/browser-api";
 
 type Props = {
   initialLogs: DailyLog[];
@@ -103,8 +103,119 @@ const pastelDeleteButtonClass =
 const pastelHeartButtonClass =
   'rounded-full border border-rose-200/20 bg-rose-100/10 px-2 py-1 text-rose-100 transition hover:bg-rose-100/20 disabled:opacity-60';
 
-const mealTagClass =
-  'inline-flex items-center rounded-full border border-sky-200/15 bg-sky-100/10 px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-sky-50';
+const mealTagBaseClass =
+  'inline-flex items-center rounded-full border px-2.5 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.22em] shadow-sm ring-1 ring-white/10 backdrop-blur-sm';
+
+function getMealTagClass(slot: string) {
+  switch (slot.toLowerCase()) {
+    case 'morning':
+      return `${mealTagBaseClass} border-amber-200/35 bg-amber-100/26 text-amber-50 shadow-[0_0_0_1px_rgba(253,230,138,0.12),0_0_18px_rgba(253,230,138,0.10)]`;
+    case 'afternoon':
+      return `${mealTagBaseClass} border-sky-200/35 bg-sky-100/24 text-sky-50 shadow-[0_0_0_1px_rgba(186,230,253,0.12),0_0_18px_rgba(186,230,253,0.10)]`;
+    case 'evening':
+      return `${mealTagBaseClass} border-violet-200/35 bg-violet-100/24 text-violet-50 shadow-[0_0_0_1px_rgba(221,214,254,0.12),0_0_18px_rgba(221,214,254,0.10)]`;
+    case 'night':
+      return `${mealTagBaseClass} border-rose-200/30 bg-rose-100/22 text-rose-50 shadow-[0_0_0_1px_rgba(254,205,211,0.12),0_0_18px_rgba(254,205,211,0.10)]`;
+    default:
+      return `${mealTagBaseClass} border-slate-200/20 bg-slate-100/14 text-slate-50`;
+  }
+}
+
+function getTimeSlotControlClass(slot: string) {
+  switch (slot.toLowerCase()) {
+    case 'morning':
+      return 'border-amber-200/35 bg-amber-100/22 text-amber-50 shadow-[0_0_0_1px_rgba(253,230,138,0.10),0_0_16px_rgba(253,230,138,0.08)]';
+    case 'afternoon':
+      return 'border-sky-200/35 bg-sky-100/22 text-sky-50 shadow-[0_0_0_1px_rgba(186,230,253,0.10),0_0_16px_rgba(186,230,253,0.08)]';
+    case 'evening':
+      return 'border-violet-200/35 bg-violet-100/22 text-violet-50 shadow-[0_0_0_1px_rgba(221,214,254,0.10),0_0_16px_rgba(221,214,254,0.08)]';
+    case 'night':
+      return 'border-rose-200/30 bg-rose-100/20 text-rose-50 shadow-[0_0_0_1px_rgba(254,205,211,0.10),0_0_16px_rgba(254,205,211,0.08)]';
+    default:
+      return 'border-white/10 bg-white/8 text-white';
+  }
+}
+
+const calorieTarget = { low: 1900, high: 2100 };
+const macroTargets = { protein: 120, carbs: 220, fat: 70 };
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(value, 100));
+}
+
+function getCalorieTone(calories: number) {
+  if (calories > calorieTarget.high) return 'from-rose-300 via-rose-200 to-orange-200';
+  if (calories >= calorieTarget.low) return 'from-emerald-300 via-cyan-200 to-sky-200';
+  return 'from-cyan-300 via-sky-200 to-emerald-200';
+}
+
+function getCalorieGaugeTone(calories: number) {
+  if (calories > calorieTarget.high) {
+    return {
+      track: 'rgba(251,113,133,0.18)',
+      stroke: 'rgba(248,113,113,0.95)',
+      label: 'Over target',
+      pill: 'border-rose-200/25 bg-rose-100/14 text-rose-50',
+    };
+  }
+
+  if (calories >= calorieTarget.low) {
+    return {
+      track: 'rgba(250,204,21,0.18)',
+      stroke: 'rgba(250,204,21,0.95)',
+      label: 'On track',
+      pill: 'border-amber-200/25 bg-amber-100/16 text-amber-50',
+    };
+  }
+
+  return {
+    track: 'rgba(134,239,172,0.16)',
+    stroke: 'rgba(134,239,172,0.95)',
+    label: 'Good pace',
+    pill: 'border-emerald-200/25 bg-emerald-100/16 text-emerald-50',
+  };
+}
+
+function getMacroTone(label: 'protein' | 'carbs' | 'fat', value: number) {
+  const target = macroTargets[label];
+  const ratio = target > 0 ? value / target : 0;
+
+  if (label === 'protein') {
+    if (ratio > 1) return 'from-emerald-300 via-cyan-200 to-emerald-200';
+    if (ratio >= 0.8) return 'from-emerald-300 via-emerald-200 to-emerald-100';
+    return 'from-emerald-300 via-cyan-200 to-sky-200';
+  }
+
+  if (ratio > 1) return 'from-rose-400 via-rose-300 to-orange-200';
+  if (ratio >= 0.8) return 'from-rose-200 via-pink-200 to-rose-100';
+  if (ratio >= 0.6) return 'from-amber-300 via-amber-200 to-rose-100';
+  return label === 'carbs'
+    ? 'from-amber-300 via-yellow-200 to-orange-200'
+    : 'from-fuchsia-300 via-pink-200 to-rose-200';
+}
+
+function getMacroTrackClass(label: 'protein' | 'carbs' | 'fat', value: number) {
+  const target = macroTargets[label];
+  const ratio = target > 0 ? value / target : 0;
+
+  if (label === 'protein') {
+    if (ratio > 1) return 'border-emerald-200/35 bg-emerald-100/12 text-emerald-50';
+    if (ratio >= 0.8) return 'border-emerald-200/25 bg-emerald-100/8 text-emerald-50';
+    return 'border-emerald-200/15 bg-emerald-100/6 text-emerald-50';
+  }
+
+  if (ratio > 1) return 'border-rose-200/35 bg-rose-100/16 text-rose-50';
+  if (ratio >= 0.8) return 'border-pink-200/30 bg-pink-100/18 text-rose-50';
+  if (ratio >= 0.6) return 'border-pink-200/22 bg-pink-100/10 text-rose-50';
+  return label === 'carbs'
+    ? 'border-amber-200/18 bg-amber-100/8 text-amber-50'
+    : 'border-fuchsia-200/18 bg-fuchsia-100/8 text-fuchsia-50';
+}
+
+function getMacroFillWidth(label: 'protein' | 'carbs' | 'fat', value: number) {
+  const target = macroTargets[label];
+  return `${clampPercent((value / Math.max(target, 1)) * 100)}%`;
+}
 
 export function CalorieDashboard({
   initialLogs,
@@ -204,10 +315,21 @@ export function CalorieDashboard({
   }, [selectedDayLogs]);
 
   const totalCalories = resolvedTotals.calories;
-  const targetLow = 1900;
-  const targetHigh = 2100;
+  const targetLow = calorieTarget.low;
+  const targetHigh = calorieTarget.high;
   const targetLabel = `${targetLow}-${targetHigh} kcal`;
   const calorieProgress = Math.min((totalCalories / targetHigh) * 100, 100);
+  const calorieDial = getCalorieGaugeTone(totalCalories);
+  const macroCards: Array<{
+    key: 'protein' | 'carbs' | 'fat';
+    label: string;
+    value: number;
+    target: number;
+  }> = [
+    { key: 'protein', label: 'Protein', value: resolvedTotals.protein, target: macroTargets.protein },
+    { key: 'carbs', label: 'Carbs', value: resolvedTotals.carbs, target: macroTargets.carbs },
+    { key: 'fat', label: 'Fat', value: resolvedTotals.fat, target: macroTargets.fat },
+  ];
 
   const pendingCount = selectedDayLogs.filter((l) => l.status === "pending").length;
 
@@ -341,10 +463,10 @@ export function CalorieDashboard({
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-3 pb-24 pt-4 sm:px-4 sm:pb-10">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+    <div className="mx-auto w-full max-w-2xl px-3 pb-20 pt-3 sm:px-4 sm:pb-10">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div>
-          <h2 className="text-lg font-semibold">{selectedDate === todayKey ? "Today's log" : `${formatDateKeyLabel(selectedDate)} log`}</h2>
+          <h2 className="text-base font-semibold sm:text-lg">{selectedDate === todayKey ? "Today's log" : `${formatDateKeyLabel(selectedDate)} log`}</h2>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
@@ -366,102 +488,99 @@ export function CalorieDashboard({
             <div className={`rounded-2xl border px-3 py-2 text-sm shadow-sm ${syncError ? 'border-rose-200/25 bg-rose-100/10 text-rose-100' : 'border-emerald-200/20 bg-emerald-100/10 text-emerald-100'}`}>
               {syncError ? syncError : syncMessage}
             </div>
-          ) : (
-            <div className="text-sm text-slate-400">Click sync to run Gemini analysis for the selected day.</div>
-          )}
+          ) : null}
         </div>
       </div>
 
-      <section className="mt-4">
-        <div className="relative overflow-hidden rounded-[1.5rem] border border-sky-200/25 bg-gradient-to-br from-sky-300/18 via-slate-950 to-slate-900 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] lg:hidden">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(186,230,253,0.16),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(167,243,208,0.12),transparent_28%)]" />
-          <div className="relative">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-[0.72rem] uppercase tracking-[0.28em] text-cyan-100/70">Today&apos;s calories</div>
-                <div className="mt-2 text-3xl font-semibold tracking-tight text-white">{Math.round(totalCalories)} kcal</div>
-                <div className="mt-2 text-sm text-cyan-100/80">Target window {targetLabel}</div>
-              </div>
-              <div className="rounded-full border border-white/15 bg-white/10 px-3 py-2 text-center text-xs text-slate-200">
-                <div className="uppercase tracking-[0.22em] text-slate-400">Progress</div>
-                <div className="mt-1 text-lg font-semibold text-white">{Math.round(calorieProgress)}%</div>
-              </div>
-            </div>
-            <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-300 to-emerald-300" style={{ width: `${calorieProgress}%` }} />
-            </div>
-            <div className="mt-4 rounded-2xl border border-white/10 bg-white/6 p-4">
-              <div className="text-[0.72rem] uppercase tracking-[0.28em] text-slate-400">Macros from resolved items</div>
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                {[
-                  { label: 'P', value: resolvedTotals.protein, accent: 'from-emerald-400/25 to-emerald-300/5' },
-                  { label: 'C', value: resolvedTotals.carbs, accent: 'from-amber-400/25 to-amber-300/5' },
-                  { label: 'F', value: resolvedTotals.fat, accent: 'from-fuchsia-400/25 to-fuchsia-300/5' },
-                ].map((macro) => (
-                  <div key={macro.label} className={`rounded-2xl border border-white/10 bg-gradient-to-b ${macro.accent} px-3 py-3 text-center`}>
-                    <div className="text-[0.68rem] uppercase tracking-[0.2em] text-slate-300">{macro.label}</div>
-                    <div className="mt-1 text-lg font-semibold text-white">{Math.round(macro.value)}g</div>
+      <section className="mt-2">
+        <div className="relative overflow-hidden rounded-[1.6rem] border border-white/10 bg-slate-950/70 p-3 shadow-[0_18px_50px_rgba(0,0,0,0.3)] sm:p-4">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(125,211,252,0.18),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(167,243,208,0.12),transparent_26%)]" />
+          <div className="relative grid gap-3 xl:grid-cols-[1.05fr_0.95fr]">
+            <div className="rounded-[1.3rem] border border-white/10 bg-white/5 p-4 backdrop-blur-xl">
+              <div className="flex flex-col items-center justify-center gap-4">
+                <div className="relative flex h-56 w-56 items-center justify-center sm:h-60 sm:w-60">
+                  <svg className="absolute inset-0 h-full w-full -rotate-90" viewBox="0 0 120 120" aria-hidden="true">
+                    <circle cx="60" cy="60" r="46" fill="none" stroke={calorieDial.track} strokeWidth="10" />
+                    <circle
+                      cx="60"
+                      cy="60"
+                      r="46"
+                      fill="none"
+                      stroke={calorieDial.stroke}
+                      strokeWidth="10"
+                      strokeLinecap="round"
+                      strokeDasharray={`${clampPercent(calorieProgress)} 100`}
+                      pathLength="100"
+                    />
+                  </svg>
+
+                  <div className="relative z-10 flex h-44 w-44 flex-col items-center justify-center rounded-full border border-white/10 bg-slate-950/80 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.02),0_20px_50px_rgba(0,0,0,0.35)]">
+                    <div className="text-[0.58rem] uppercase tracking-[0.3em] text-slate-400">Calories</div>
+                    <div className="mt-2 text-4xl font-semibold tracking-tight text-white">{Math.round(totalCalories)}</div>
+                    <div className={`mt-3 rounded-full border px-3 py-1 text-[0.62rem] uppercase tracking-[0.22em] ${calorieDial.pill}`}>
+                      {calorieDial.label}
+                    </div>
+                    <div className="mt-2 text-xs text-slate-400">{Math.round(calorieProgress)}% of target</div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="hidden lg:grid lg:grid-cols-[1.05fr_0.95fr] lg:gap-3">
-          <div className="relative overflow-hidden rounded-[1.5rem] border border-sky-200/25 bg-gradient-to-br from-sky-300/18 via-slate-950 to-slate-900 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(186,230,253,0.16),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(167,243,208,0.12),transparent_28%)]" />
-            <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <div className="text-[0.72rem] uppercase tracking-[0.28em] text-cyan-100/70">Today&apos;s calories</div>
-                <div className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">{Math.round(totalCalories)} kcal</div>
-                <div className="mt-2 text-sm text-cyan-100/80">Target window {targetLabel}</div>
-              </div>
-              <div className="rounded-full border border-white/15 bg-white/10 px-3 py-2 text-center text-xs text-slate-200 sm:text-right">
-                <div className="uppercase tracking-[0.22em] text-slate-400">Progress</div>
-                <div className="mt-1 text-lg font-semibold text-white">{Math.round(calorieProgress)}%</div>
-              </div>
-            </div>
-            <div className="relative mt-5 h-2 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-300 to-emerald-300" style={{ width: `${calorieProgress}%` }} />
-            </div>
-          </div>
-
-          <div className="rounded-[1.5rem] border border-rose-200/20 bg-gradient-to-br from-rose-100/8 via-white/6 to-violet-100/8 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.22)] backdrop-blur-xl">
-            <div className="text-[0.72rem] uppercase tracking-[0.28em] text-slate-400">Macros from resolved items</div>
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {[
-                { label: 'Protein', value: resolvedTotals.protein, accent: 'from-emerald-400/25 to-emerald-300/5' },
-                { label: 'Carbs', value: resolvedTotals.carbs, accent: 'from-amber-400/25 to-amber-300/5' },
-                { label: 'Fat', value: resolvedTotals.fat, accent: 'from-fuchsia-400/25 to-fuchsia-300/5' },
-              ].map((macro) => (
-                <div key={macro.label} className={`rounded-2xl border border-white/10 bg-gradient-to-b ${macro.accent} p-4 text-center shadow-sm`}>
-                  <div className="text-xs uppercase tracking-[0.2em] text-slate-300">{macro.label}</div>
-                  <div className="mt-2 text-2xl font-semibold text-white">{formatMacro(macro.value)}</div>
                 </div>
-              ))}
+              </div>
             </div>
-            <div className="mt-4 text-sm text-slate-400">Macros update from resolved food items only, so they stay consistent with the entries Gemini has broken down.</div>
+
+            <div className="rounded-[1.3rem] border border-white/10 bg-white/5 p-4 backdrop-blur-xl">
+              <div className="flex items-end justify-between gap-2">
+                <div>
+                  <div className="text-[0.62rem] uppercase tracking-[0.28em] text-slate-400">Macros</div>
+                  <h3 className="mt-1 text-base font-semibold text-white sm:text-lg">Protein, carbs, fats</h3>
+                </div>
+              </div>
+
+              <div className="mt-3 space-y-2">
+                {macroCards.map((macro) => {
+                  const labelKey = macro.key;
+                  const target = macro.target;
+                  const ratio = target > 0 ? macro.value / target : 0;
+                  const fillWidth = getMacroFillWidth(labelKey, macro.value);
+                  const cardTone = getMacroTrackClass(labelKey, macro.value);
+                  const fillTone = getMacroTone(labelKey, macro.value);
+
+                  return (
+                    <div key={macro.key} className={`rounded-2xl border p-3 ${cardTone}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[0.62rem] uppercase tracking-[0.22em] text-slate-300">{macro.label}</div>
+                          <div className="mt-1 text-sm font-semibold text-white">
+                            {Math.round(macro.value)}g <span className="text-[0.65rem] font-normal text-slate-300">/ {target}g ideal</span>
+                          </div>
+                        </div>
+                        <div className="text-right text-[0.62rem] text-slate-300">
+                          <div>{Math.round(ratio * 100)}%</div>
+                        </div>
+                      </div>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                        <div className={`h-full rounded-full bg-gradient-to-r ${fillTone}`} style={{ width: fillWidth }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
       <section className="mt-4">
-        <h3 className="mb-2 font-medium">Quick Add — {labelTimeSlot(timeOfDay)}</h3>
         <div className="mb-3 flex flex-wrap items-center gap-3">
-          <label className="text-sm text-slate-300">
-            Time of day
-            <select
-              value={timeOfDay}
-              onChange={(e) => setTimeOfDay(e.target.value)}
-              className={`ml-2 ${surfaceInputClass}`}
-            >
+          <select
+            aria-label="Time of day"
+            value={timeOfDay}
+            onChange={(e) => setTimeOfDay(e.target.value)}
+            className={`${surfaceInputClass} ${getTimeSlotControlClass(timeOfDay)}`}
+          >
               <option value="morning">Morning</option>
               <option value="afternoon">Afternoon</option>
               <option value="evening">Evening</option>
               <option value="night">Night</option>
-            </select>
-          </label>
+          </select>
         </div>
         <div className="flex flex-wrap gap-2">
           {topPicks.map((p) => (
@@ -508,7 +627,7 @@ export function CalorieDashboard({
             <li key={log.id} className="flex flex-col gap-3 rounded-[1.25rem] border border-white/10 bg-gradient-to-r from-white/8 via-sky-100/5 to-violet-100/5 p-3 shadow-[0_10px_30px_rgba(0,0,0,0.16)] backdrop-blur sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <div className="break-words font-medium">{log.display_name}</div>
-                <div className={mealTagClass}>{labelTimeSlot(getLogMealSlot(log))}</div>
+                <div className={getMealTagClass(getLogMealSlot(log))}>{labelTimeSlot(getLogMealSlot(log))}</div>
                 {log.quantity ? <div className="text-xs text-slate-500">Qty: {log.quantity}</div> : null}
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -543,30 +662,22 @@ export function CalorieDashboard({
       </section>
 
       {insight && (
-        <section className="mt-6 rounded-[1.5rem] border border-amber-200/15 bg-gradient-to-br from-amber-100/8 via-slate-950 to-rose-100/8 p-4 shadow-[0_18px_50px_rgba(0,0,0,0.2)]">
-          <h4 className="font-semibold text-white">Today's Nutrition Report</h4>
-          <div className="mt-2 text-sm">
-            <div className="rounded-xl bg-emerald-100/8 px-3 py-2 text-emerald-50">🏆 Best choice: {insight.best_choice ?? "—"}</div>
-            <div className="mt-2 rounded-xl bg-amber-100/8 px-3 py-2 text-amber-50">⚠️ Could skip: {insight.skip_suggestion ?? "—"}</div>
-            <div className="mt-2 rounded-xl bg-sky-100/8 px-3 py-2 text-sky-50">📊 Intake: {insight.intake_assessment ?? "—"}</div>
+        <section className="mt-4 rounded-[1.25rem] border border-white/10 bg-white/5 p-3 shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="rounded-xl border border-emerald-200/15 bg-emerald-100/8 px-3 py-2 text-emerald-50">{insight.best_choice ?? '—'}</div>
+            <div className="rounded-xl border border-amber-200/15 bg-amber-100/8 px-3 py-2 text-amber-50">{insight.skip_suggestion ?? '—'}</div>
+            <div className="rounded-xl border border-sky-200/15 bg-sky-100/8 px-3 py-2 text-sky-50">{insight.intake_assessment ?? '—'}</div>
           </div>
         </section>
       )}
 
-      {/* Minimal, informative session summary */}
       <div className="mt-4 rounded-xl border border-white/6 bg-white/4 px-4 py-3 text-xs text-slate-300 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div className="leading-5">
           <strong>Saved:</strong> {Object.values(heartedLogs).filter(Boolean).length} •
           <strong className="ml-2">Entries:</strong> {selectedDayLogs.length} ({selectedDayLogs.filter((l) => l.status === 'resolved').length} done, {pendingCount} pending) •
           <strong className="ml-2">Total:</strong> {Math.round(totalCalories)} kcal
         </div>
-        <div className="text-slate-400 leading-5">
-          {insight ? (
-            <span>Best: {insight.best_choice ?? '—'} · Skip: {insight.skip_suggestion ?? '—'} · {insight.intake_assessment ?? ''}</span>
-          ) : (
-            <span>Tip: click ♥ to save a food — saved items improve recommendations.</span>
-          )}
-        </div>
+        <div className="text-slate-400 leading-5">{insight ? <span>{insight.gemini_summary ?? ''}</span> : null}</div>
       </div>
     </div>
   );
