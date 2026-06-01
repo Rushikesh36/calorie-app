@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
 import { TopNav } from '@/components/top-nav';
 import StatusClient from '@/components/status-client';
 import type { DailyLog, WeightLog } from '@/lib/types';
@@ -117,13 +116,18 @@ type StatusPageClientProps = {
 };
 
 export default function StatusPageClient({ loading = false }: StatusPageClientProps) {
-  const searchParams = useSearchParams();
-  const selectedRange = toRangeKey(searchParams.get('range') ?? undefined);
-  const config = rangeConfig[selectedRange];
-  const dateWindow = useMemo(() => (config.days ? createWindow(config.days) : null), [config.days]);
   const [logs, setLogs] = useState<DailyLog[]>([]);
   const [weightLogs, setWeightLogs] = useState<WeightLog[]>([]);
   const [ready, setReady] = useState(false);
+  const [selectedRange, setSelectedRange] = useState<RangeKey>('week');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setSelectedRange(toRangeKey(params.get('range') ?? undefined));
+  }, []);
+
+  const config = rangeConfig[selectedRange];
+  const dateWindow = useMemo(() => (config.days ? createWindow(config.days) : null), [config.days]);
 
   useEffect(() => {
     let active = true;
@@ -148,7 +152,6 @@ export default function StatusPageClient({ loading = false }: StatusPageClientPr
 
   const totalCalories = getDayTotal(logs);
   const uniqueDays = new Set(logs.map((log) => dayKey(new Date(log.logged_at)))).size || (dateWindow?.dates.length ?? 1);
-  const averagePerDay = uniqueDays > 0 ? totalCalories / uniqueDays : 0;
   const groupedDays = dateWindow
     ? dateWindow.dates.map((date) => {
         const key = dayKey(date);
@@ -169,8 +172,6 @@ export default function StatusPageClient({ loading = false }: StatusPageClientPr
     { label: 'No data', calories: 0, entries: 0, inRange: false },
   );
   const topFoods: { name: string; calories: number; count: number }[] = buildTopFoods(logs);
-  const maxBarCalories = Math.max(dailyCalorieTarget.maximum, ...groupedDays.map((day) => day.calories), 1);
-  const inRangeDays = dateWindow ? groupedDays.filter((d) => d.inRange).length : 0;
 
   if (loading) {
     return <LoadingShell />;
@@ -213,7 +214,6 @@ export default function StatusPageClient({ loading = false }: StatusPageClientPr
             </div>
           </section>
         )}
-
       </div>
     </main>
   );
