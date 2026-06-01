@@ -97,63 +97,20 @@ function parseGeminiJson(raw: string) {
   }
 }
 
-function getGeminiKeys() {
-  return [
-    process.env.NEXT_PUBLIC_GOOGLE_API_KEY,
-    process.env.NEXT_PUBLIC_GOOGLE_API_KEY_1,
-    process.env.NEXT_PUBLIC_GOOGLE_API_KEY_2,
-    process.env.NEXT_PUBLIC_GOOGLE_API_KEY_3,
-    process.env.NEXT_PUBLIC_GOOGLE_API_KEY_4,
-    process.env.NEXT_PUBLIC_GOOGLE_API_KEY_5,
-  ].filter(Boolean) as string[];
-}
-
 async function callGemini(prompt: string): Promise<string> {
-  const keys = getGeminiKeys();
-  if (!keys.length) throw new Error('No public Gemini API keys configured');
+  const res = await fetch('/api/gemini/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
 
-  for (const key of keys) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: prompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.2,
-            responseMimeType: 'application/json',
-          },
-        }),
-      },
-    );
-
-    if (res.status === 429) {
-      continue;
-    }
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Gemini error ${res.status}: ${text}`);
-    }
-
-    const data = await res.json();
-    const candidate =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ??
-      data?.candidates?.[0]?.content?.text ??
-      data?.output?.[0]?.content?.text ??
-      data?.result ??
-      '';
-
-    return candidate;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Gemini proxy error ${res.status}`);
   }
 
-  throw new Error('All Gemini API keys are rate-limited. Try again in a minute.');
+  const data = await res.json();
+  return typeof data?.text === 'string' ? data.text : '';
 }
 
 export async function getLogsForDate(date: string): Promise<DailyLog[]> {
