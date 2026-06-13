@@ -136,7 +136,7 @@ export default function StatusPageClient({ loading = false }: StatusPageClientPr
     (async () => {
       const [nextLogs, nextWeightLogs] = await Promise.all([
         dateWindow ? getLogsInRange({ start: dateWindow.start, end: dateWindow.end }) : getLogsInRange(),
-        dateWindow ? getWeightLogsInRange({ start: dateWindow.start, end: dateWindow.end }) : getWeightLogsInRange(),
+        getWeightLogsInRange(),
       ]);
 
       if (!active) return;

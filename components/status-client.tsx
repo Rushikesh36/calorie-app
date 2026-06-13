@@ -2,6 +2,17 @@
 
 import React, { FormEvent, useEffect, useMemo, useState } from 'react';
 import { FiEdit2, FiPlus, FiTrash2, FiX } from 'react-icons/fi';
+import {
+  Brush,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import type { DailyLog, WeightLog } from '@/lib/types';
 import { addWeightLog, deleteWeightLog, updateWeightLog } from '@/lib/browser-api';
 
@@ -20,6 +31,20 @@ type ChartMargins = {
   right: number;
   bottom: number;
   left: number;
+};
+
+type BrushRange = {
+  startIndex: number;
+  endIndex: number;
+};
+
+type WeightChartPoint = {
+  measuredAt: string;
+  label: string;
+  fullLabel: string;
+  weight: number;
+  benchmark: number;
+  note: string | null;
 };
 
 function formatCalories(value: number) {
@@ -51,6 +76,23 @@ function formatChartWeight(value: number) {
 
 function formatChartDate(date: Date) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
+}
+
+function WeightChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload?: WeightChartPoint }> }) {
+  if (!active || !payload?.length || !payload[0]?.payload) return null;
+
+  const point = payload[0].payload;
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-slate-950/95 px-4 py-3 shadow-[0_18px_30px_rgba(0,0,0,0.35)] backdrop-blur">
+      <div className="text-sm font-semibold text-white">{point.fullLabel}</div>
+      <div className="mt-2 space-y-1 text-sm text-slate-300">
+        <div>Weight: {formatWeight(point.weight)}</div>
+        <div>Trend: {formatWeight(point.benchmark)}</div>
+{point.note ? <div className="pt-1 text-slate-400">{point.note}</div> : null}
+      </div>
+    </div>
+  );
 }
 
 function createTickValues(min: number, max: number, count: number) {
@@ -137,7 +179,7 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
   const [weightValue, setWeightValue] = useState('');
   const [weightNote, setWeightNote] = useState('');
   const [savingWeight, setSavingWeight] = useState(false);
-  const [zoom, setZoom] = useState(1);
+  const [brushRange, setBrushRange] = useState<BrushRange | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingWeight, setEditingWeight] = useState('');
   const [editingNote, setEditingNote] = useState('');
@@ -146,6 +188,62 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
   useEffect(() => {
     setWeightEntries([...weightLogs].sort((a, b) => Number(new Date(b.measured_at)) - Number(new Date(a.measured_at))));
   }, [weightLogs]);
+
+  const weightChartData = useMemo(() => {
+    const sortedAscending = [...weightEntries].sort((a, b) => Number(new Date(a.measured_at)) - Number(new Date(b.measured_at)));
+    if (sortedAscending.length === 0) {
+      return [] as WeightChartPoint[];
+    }
+
+    const firstDate = new Date(sortedAscending[0].measured_at);
+    const firstWeight = sortedAscending[0].weight_kg;
+
+    return sortedAscending.map((entry) => {
+      const measuredDate = new Date(entry.measured_at);
+      const daysForward = Math.max(0, (measuredDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+      const benchmark = firstWeight - 3 * (daysForward / 30);
+
+      return {
+        measuredAt: entry.measured_at,
+        label: new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(measuredDate),
+        fullLabel: formatChartDate(measuredDate),
+        weight: entry.weight_kg,
+        benchmark,
+        note: entry.note,
+      };
+    });
+  }, [weightEntries]);
+
+  useEffect(() => {
+    if (weightChartData.length === 0) {
+      setBrushRange(null);
+      return;
+    }
+
+    const endIndex = weightChartData.length - 1;
+    const startIndex = Math.max(0, endIndex - 11);
+    setBrushRange({ startIndex, endIndex });
+  }, [weightChartData.length]);
+
+  const visibleWeightChartData = useMemo(() => {
+    if (weightChartData.length === 0) return [] as WeightChartPoint[];
+
+    const startIndex = brushRange?.startIndex ?? 0;
+    const endIndex = brushRange?.endIndex ?? weightChartData.length - 1;
+    return weightChartData.slice(startIndex, endIndex + 1);
+  }, [brushRange, weightChartData]);
+
+  const chartRangeLabel = useMemo(() => {
+    if (visibleWeightChartData.length === 0) return 'No entries selected';
+
+    const first = visibleWeightChartData[0];
+    const last = visibleWeightChartData[visibleWeightChartData.length - 1];
+
+    return `${first.fullLabel} - ${last.fullLabel}`;
+  }, [visibleWeightChartData]);
+
+  const latestWeight = weightChartData[weightChartData.length - 1]?.weight ?? 0;
+  const visibleCount = visibleWeightChartData.length;
 
   const grouped = useMemo(() => {
     const buckets = new Map<string, DailyLog[]>();
@@ -202,127 +300,6 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
 
   const maxBarCalories = Math.max(dailyCalorieTarget.maximum, ...groupedDays.map((day) => day.calories), 1);
   const totalProgressValue = Math.min((totalCalories / (dailyCalorieTarget.maximum * Math.max(uniqueDays, 1))) * 100, 100);
-
-  const weightChart = useMemo(() => {
-    const sortedAscending = [...weightEntries].sort((a, b) => Number(new Date(a.measured_at)) - Number(new Date(b.measured_at)));
-    const n = sortedAscending.length;
-    const latestWeight = sortedAscending[n - 1]?.weight_kg ?? 0;
-    const targetWeight = 80;
-
-    // Chart sizing
-    const chartWidth = Math.max(760, 760);
-    const chartHeight = 380;
-    const margins: ChartMargins = {
-      top: 24,
-      right: 28,
-      bottom: 78,
-      left: 72,
-    };
-
-    if (n === 0) {
-      return {
-        chartWidth,
-        chartHeight,
-        margins,
-        sortedAscending,
-        latestWeight,
-        benchmarkValues: [] as number[],
-        targetValues: [] as number[],
-        currentPath: '',
-        benchmarkPath: '',
-        targetPath: '',
-        currentPoints: [] as Array<{ x: number; y: number; value: number; label: string }>,
-        xTicks: [] as Array<{ x: number; label: string }> ,
-        yTicks: [] as number[],
-      };
-    }
-
-    // Determine visible window based on zoom. zoom=1 -> show all, zoom>1 -> show fewer recent points
-    const visibleCount = Math.max(1, Math.round(n / zoom));
-    const endIndex = n - 1;
-    const startIndex = Math.max(0, n - visibleCount);
-
-    const firstDate = new Date(sortedAscending[startIndex].measured_at);
-    const latestDate = new Date(sortedAscending[endIndex].measured_at);
-
-    // For single point, give a generous domain so lines have span
-    if (visibleCount === 1) {
-      firstDate.setDate(firstDate.getDate() - 30);
-      latestDate.setDate(latestDate.getDate() + 30);
-    }
-
-    const domainSpanMs = Math.max(latestDate.getTime() - firstDate.getTime(), 1);
-
-    const benchmarkValues = sortedAscending.map((entry) => {
-      const d = new Date(entry.measured_at);
-      const daysFromLatest = (d.getTime() - latestDate.getTime()) / (1000 * 60 * 60 * 24);
-      const monthsFromLatest = daysFromLatest / 30;
-      return latestWeight - 2 * monthsFromLatest;
-    });
-
-    const targetValues = sortedAscending.map(() => targetWeight);
-
-    // Value range and padding
-    const currentValues = sortedAscending.map((entry) => entry.weight_kg);
-    const allValues = [...currentValues, ...benchmarkValues, ...targetValues];
-    const minValue = Math.min(...allValues);
-    const maxValue = Math.max(...allValues);
-    const valuePadding = Math.max(1, (maxValue - minValue) * 0.18);
-    const chartMin = minValue - valuePadding;
-    const chartMax = maxValue + valuePadding;
-    const plotWidth = chartWidth - margins.left - margins.right;
-    const plotHeight = chartHeight - margins.top - margins.bottom;
-
-    const scaleX = (date: Date) => margins.left + ((date.getTime() - firstDate.getTime()) / domainSpanMs) * plotWidth;
-    const scaleY = (value: number) => margins.top + ((chartMax - value) / Math.max(chartMax - chartMin, 0.1)) * plotHeight;
-
-    // Points only for visible window
-    const currentPoints = sortedAscending.slice(startIndex, endIndex + 1).map((entry) => ({
-      x: scaleX(new Date(entry.measured_at)),
-      y: scaleY(entry.weight_kg),
-      value: entry.weight_kg,
-      label: formatChartDate(new Date(entry.measured_at)),
-    }));
-
-    // X ticks chosen within visible window
-    const visibleTotal = endIndex - startIndex + 1;
-    const xTickRelIndices = pickTickIndices(visibleTotal, 6);
-    const xTicks = xTickRelIndices.map((relIdx) => {
-      const idx = startIndex + relIdx;
-      return {
-        x: scaleX(new Date(sortedAscending[idx].measured_at)),
-        label: formatChartDate(new Date(sortedAscending[idx].measured_at)),
-      };
-    });
-
-    const yTicks = createTickValues(chartMin, chartMax, 5);
-
-    const currentPath = buildPathFromPoints(currentPoints);
-    const benchmarkPath = buildPathFromPoints([
-      { x: margins.left, y: scaleY(latestWeight - 2 * (((firstDate.getTime() - latestDate.getTime()) / (1000 * 60 * 60 * 24)) / 30)) },
-      { x: chartWidth - margins.right, y: scaleY(latestWeight - 2 * (((latestDate.getTime() - latestDate.getTime()) / (1000 * 60 * 60 * 24)) / 30)) },
-    ]);
-    const targetPath = buildPathFromPoints([
-      { x: margins.left, y: scaleY(targetWeight) },
-      { x: chartWidth - margins.right, y: scaleY(targetWeight) },
-    ]);
-
-    return {
-      chartWidth,
-      chartHeight,
-      margins,
-      sortedAscending,
-      latestWeight,
-      benchmarkValues,
-      targetValues,
-      currentPath,
-      benchmarkPath,
-      targetPath,
-      currentPoints,
-      xTicks,
-      yTicks,
-    };
-  }, [weightEntries]);
 
   async function handleAddWeightLog(e: FormEvent) {
     e.preventDefault();
@@ -465,8 +442,7 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
           </div>
           <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3 sm:text-sm">
             <div className="rounded-2xl border border-rose-200/15 bg-rose-100/10 px-3 py-2 text-rose-100">Red: current weight</div>
-            <div className="rounded-2xl border border-cyan-200/15 bg-cyan-100/10 px-3 py-2 text-cyan-100">Blue: benchmark -2kg/month</div>
-            <div className="rounded-2xl border border-emerald-200/15 bg-emerald-100/10 px-3 py-2 text-emerald-100">Green: flat 80kg line</div>
+            <div className="rounded-2xl border border-cyan-200/15 bg-cyan-100/10 px-3 py-2 text-cyan-100">Blue: benchmark -3kg/month</div>
           </div>
         </div>
 
@@ -504,126 +480,93 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
         </form>
 
         <div className="mt-6 overflow-hidden rounded-[1.5rem] border border-white/10 bg-slate-950/70 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/8 pb-3">
             <div>
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Chart controls</div>
-              <div className="mt-1 text-sm text-slate-300">Use zoom to inspect the timeline.</div>
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Weight chart</div>
+              <div className="mt-1 text-sm text-slate-300">Brush the timeline to zoom. Hover for exact values.</div>
             </div>
-            <div className="flex items-center gap-3">
-              <label className="text-xs uppercase tracking-[0.2em] text-slate-500" htmlFor="weight-chart-zoom">
-                Zoom
-              </label>
-              <input
-                id="weight-chart-zoom"
-                type="range"
-                min="1"
-                max="3"
-                step="0.1"
-                value={zoom}
-                onChange={(e) => setZoom(Number(e.target.value))}
-                className="w-40 accent-cyan-300"
-              />
-              <span className="min-w-12 text-sm text-slate-300">{zoom.toFixed(1)}x</span>
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (weightChartData.length === 0) {
+                  setBrushRange(null);
+                  return;
+                }
+
+                setBrushRange({ startIndex: 0, endIndex: weightChartData.length - 1 });
+              }}
+              className="rounded-full border border-white/10 bg-white/8 px-3 py-2 text-xs font-medium text-slate-200 transition hover:bg-white/12"
+            >
+              Show all
+            </button>
           </div>
 
-          {weightChart.sortedAscending.length === 0 ? (
+          {weightChartData.length === 0 ? (
             <div className="py-8 text-sm text-slate-400">Add at least one weight entry to see the chart.</div>
           ) : (
-            <div className="mt-4 w-full overflow-hidden rounded-[1.25rem] border border-white/5 bg-slate-950/60 p-2 sm:p-3">
-              <svg
-                viewBox={`0 0 ${weightChart.chartWidth} ${weightChart.chartHeight}`}
-                  className="block h-auto w-full"
-                  preserveAspectRatio="xMidYMid meet"
-                  style={{ maxWidth: '100%', height: 'auto' }}
-              >
-                <line
-                  x1={weightChart.margins.left}
-                  y1={weightChart.margins.top}
-                  x2={weightChart.margins.left}
-                  y2={weightChart.chartHeight - weightChart.margins.bottom}
-                  stroke="rgba(148,163,184,0.55)"
-                  strokeWidth="1.5"
-                />
-                <line
-                  x1={weightChart.margins.left}
-                  y1={weightChart.chartHeight - weightChart.margins.bottom}
-                  x2={weightChart.chartWidth - weightChart.margins.right}
-                  y2={weightChart.chartHeight - weightChart.margins.bottom}
-                  stroke="rgba(148,163,184,0.55)"
-                  strokeWidth="1.5"
-                />
-
-                {weightChart.yTicks.map((tick) => {
-                  const plotHeight = weightChart.chartHeight - weightChart.margins.top - weightChart.margins.bottom;
-                  const y = weightChart.margins.top + ((Math.max(...weightChart.yTicks) - tick) / Math.max(Math.max(...weightChart.yTicks) - Math.min(...weightChart.yTicks), 0.1)) * plotHeight;
-
-                  return (
-                    <g key={`y-${tick}`}>
-                      <line
-                        x1={weightChart.margins.left}
-                        y1={y}
-                        x2={weightChart.chartWidth - weightChart.margins.right}
-                        y2={y}
-                        stroke="rgba(148,163,184,0.16)"
-                        strokeDasharray="4 6"
-                      />
-                      <text x={weightChart.margins.left - 10} y={y + 4} textAnchor="end" className="fill-slate-400" style={{ fontSize: '11px' }}>
-                        {formatChartWeight(tick)}
-                      </text>
-                    </g>
-                  );
-                })}
-
-                {weightChart.xTicks.map((tick) => (
-                  <g key={tick.label}>
-                    <line
-                      x1={tick.x}
-                      y1={weightChart.chartHeight - weightChart.margins.bottom}
-                      x2={tick.x}
-                      y2={weightChart.chartHeight - weightChart.margins.bottom + 8}
-                      stroke="rgba(148,163,184,0.55)"
-                    />
-                    <text
-                      x={tick.x}
-                      y={weightChart.chartHeight - weightChart.margins.bottom + 24}
-                      textAnchor="middle"
-                      className="fill-slate-400"
-                      style={{ fontSize: '11px' }}
-                    >
-                      {tick.label}
-                    </text>
-                  </g>
-                ))}
-
-                <path d={weightChart.targetPath} fill="none" stroke="rgba(134,239,172,0.95)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                <path d={weightChart.benchmarkPath} fill="none" stroke="rgba(96,165,250,0.95)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="8 8" />
-                <path d={weightChart.currentPath} fill="none" stroke="rgba(248,113,113,0.98)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-                {weightChart.currentPoints.map((point, index) => (
-                  <circle key={`current-${index}`} cx={point.x} cy={point.y} r="5" fill="rgba(248,113,113,0.98)" stroke="rgba(15,23,42,0.9)" strokeWidth="2" />
-                ))}
-
-                <text x={weightChart.chartWidth / 2} y={weightChart.chartHeight - 16} textAnchor="middle" className="fill-slate-400" style={{ fontSize: '12px' }}>
-                  Date, month, year
-                </text>
-                <text
-                  x={18}
-                  y={weightChart.chartHeight / 2}
-                  transform={`rotate(-90 18 ${weightChart.chartHeight / 2})`}
-                  textAnchor="middle"
-                  className="fill-slate-400"
-                  style={{ fontSize: '12px' }}
-                >
-                  Weight (kg)
-                </text>
-              </svg>
+            <div className="mt-4 h-[380px] w-full rounded-[1.25rem] border border-white/5 bg-slate-950/60 p-2 sm:p-3">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={weightChartData} margin={{ top: 12, right: 18, bottom: 20, left: 8 }}>
+                  <CartesianGrid stroke="rgba(148,163,184,0.14)" strokeDasharray="4 8" />
+                  <XAxis
+                    dataKey="label"
+                    tickLine={false}
+                    axisLine={false}
+                    minTickGap={24}
+                    tick={{ fill: '#94a3b8', fontSize: 12 }}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={formatChartWeight}
+                    tick={{ fill: '#94a3b8', fontSize: 12 }}
+                    domain={['dataMin - 1', 'dataMax + 1']}
+                    width={64}
+                  />
+                  <Tooltip content={<WeightChartTooltip />} />
+                  <Legend verticalAlign="top" height={28} wrapperStyle={{ color: '#cbd5e1' }} />
+                  <Line
+                    type="monotone"
+                    dataKey="benchmark"
+                    name="3 kg / month trend"
+                    stroke="rgba(96,165,250,0.95)"
+                    strokeWidth={2.5}
+                    strokeDasharray="8 8"
+                    dot={false}
+                    activeDot={{ r: 4 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="weight"
+                    name="Actual weight"
+                    stroke="rgba(248,113,113,0.98)"
+                    strokeWidth={3.5}
+                    dot={{ r: 4, fill: 'rgba(248,113,113,0.98)', strokeWidth: 2, stroke: 'rgba(15,23,42,0.95)' }}
+                    activeDot={{ r: 6 }}
+                  />
+                  <Brush
+                    dataKey="label"
+                    height={26}
+                    stroke="rgba(103,232,249,0.75)"
+                    travellerWidth={12}
+                    startIndex={brushRange?.startIndex ?? 0}
+                    endIndex={brushRange?.endIndex ?? Math.max(weightChartData.length - 1, 0)}
+                    tickFormatter={() => ''}
+                    onChange={(range) => {
+                      if (typeof range?.startIndex === 'number' && typeof range?.endIndex === 'number') {
+                        setBrushRange({ startIndex: range.startIndex, endIndex: range.endIndex });
+                      }
+                    }}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
             </div>
           )}
 
           <div className="mt-3 flex flex-col gap-2 text-xs text-slate-400 sm:flex-row sm:flex-wrap sm:gap-3">
-            <span>Latest: {weightChart.latestWeight ? formatWeight(weightChart.latestWeight) : '—'}</span>
-            <span>Benchmark rate: 2 kg/month</span>
-            <span>{weightEntries.length} weight logs</span>
+            <span>Latest: {latestWeight ? formatWeight(latestWeight) : '—'}</span>
+            <span>Visible: {visibleCount} of {weightChartData.length}</span>
+            <span>{chartRangeLabel}</span>
           </div>
         </div>
 
