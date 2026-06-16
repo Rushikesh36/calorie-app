@@ -1,7 +1,7 @@
 'use client';
 
 import React, { FormEvent, useEffect, useMemo, useState } from 'react';
-import { FiEdit2, FiPlus, FiTrash2, FiX } from 'react-icons/fi';
+import { FiEdit2, FiPlus, FiTrash2, FiX, FiActivity, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import {
   Brush,
   CartesianGrid,
@@ -16,8 +16,17 @@ import {
 import type { DailyLog, WeightLog } from '@/lib/types';
 import { addWeightLog, deleteWeightLog, updateWeightLog } from '@/lib/browser-api';
 
-// fallback calorie target when not provided by app settings
 const dailyCalorieTarget = { minimum: 1200, maximum: 2500 };
+const MAINTENANCE_CALORIES = 2550;
+
+type AnalysisResult = {
+  summary: string;
+  weightTrend: string;
+  caloriePattern: string;
+  recommendations: string[];
+  verdict: string;
+  dailyCalorieAdvice: string;
+};
 
 type Props = {
   logs: DailyLog[];
@@ -184,6 +193,10 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
   const [editingWeight, setEditingWeight] = useState('');
   const [editingNote, setEditingNote] = useState('');
   const [editingMeasuredAt, setEditingMeasuredAt] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
 
   useEffect(() => {
     setWeightEntries([...weightLogs].sort((a, b) => Number(new Date(b.measured_at)) - Number(new Date(a.measured_at))));
@@ -365,6 +378,77 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
     setSavingWeight(false);
   }
 
+  async function handleAnalyze() {
+    setAnalyzing(true);
+    setAnalysisResult(null);
+    setAnalysisError(null);
+    setAnalysisOpen(true);
+
+    try {
+      const weekDays = groupedDays.map((d) => `- ${d.label}: ${d.calories} kcal${d.inRange ? '' : ' (out of range)'}`).join('\n');
+      const daysInWindow = windowDatesParsed?.length ?? 7;
+      const weeklyMaintenance = MAINTENANCE_CALORIES * daysInWindow;
+      const weeklyDeficit = weeklyMaintenance - totalCalories;
+
+      const recentWeightLines = [...weightEntries]
+        .sort((a, b) => Number(new Date(a.measured_at)) - Number(new Date(b.measured_at)))
+        .slice(-10)
+        .map((e) => `- ${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(e.measured_at))}: ${e.weight_kg} kg`)
+        .join('\n');
+
+      const prompt = `You are a concise nutrition and fitness coach. Analyze the data below and give specific, honest advice.
+
+Important context for analysis:
+
+1. Calorie Target: The user is aiming for an aggressive ~3 kg/month fat loss. Daily intakes between 1,600 and 1,900 kcal are intentional and on target for this goal. Do not advise increasing calories to 2,000-2,100. Lower calorie days help protect the necessary deficit.
+2. Weight Trend: Weight loss is not linear. Account for the "whoosh" effect (temporary water retention from training followed by sudden drops). Do not flag short-term weight fluctuations or plateaus as inconsistent; treat them as a normal part of the process.
+
+Maintenance calories: ${MAINTENANCE_CALORIES} kcal/day
+Period: ${daysInWindow} days
+
+Daily calorie intake:
+${weekDays || '- No data logged'}
+
+Summary:
+
+* Total consumed: ${totalCalories} kcal
+* Total maintenance: ${weeklyMaintenance} kcal
+* Net deficit (positive = burning fat): ${weeklyDeficit} kcal
+* Average per day: ${Math.round(averagePerDay)} kcal
+* Days on target: ${inRangeDays} / ${daysInWindow}
+
+Weight history (most recent entries):
+${recentWeightLines || '- No weight entries'}
+
+Return ONLY a JSON object with exactly these fields (no markdown, no code block):
+{
+"summary": "2-3 sentence overall assessment",
+"weightTrend": "Brief weight trend analysis, factoring in normal fluctuations and the 'whoosh' effect, or 'No weight data available' if none",
+"caloriePattern": "Brief analysis of calorie intake consistency, acknowledging that 1600-1900 kcal is the target range",
+"recommendations": ["actionable tip 1", "actionable tip 2", "actionable tip 3"],
+"verdict": "One of: On Track | Great Progress | Needs Attention | Minor Adjustment Needed",
+"dailyCalorieAdvice": "Specific daily calorie target or tweak (e.g. 'Maintain 1600-1900 kcal/day to protect your 3kg/month pace')"
+}`;
+
+      const res = await fetch('/api/gemini/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+
+      if (!res.ok) throw new Error('Analysis request failed');
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      const parsed: AnalysisResult = JSON.parse(data.text);
+      setAnalysisResult(parsed);
+    } catch (err) {
+      setAnalysisError(err instanceof Error ? err.message : 'Analysis failed. Try again.');
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
   return (
     <div>
       <div className="mt-6 space-y-3">
@@ -431,6 +515,136 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
           <div className="mt-2 text-3xl font-semibold text-white">{logs.length}</div>
           <div className="mt-2 text-sm text-slate-400">All meals and custom items in this range.</div>
         </div>
+      </div>
+
+      {/* Calories burned card */}
+      {(() => {
+        const daysInWindow = windowDatesParsed?.length ?? 7;
+        const maintenance = MAINTENANCE_CALORIES * daysInWindow;
+        const deficit = maintenance - totalCalories;
+        const isDeficit = deficit > 0;
+        const fatGrams = Math.round(Math.max(0, deficit) / 7.7);
+
+        return (
+          <div className="mt-4">
+            <div className={`rounded-[1.5rem] border p-4 shadow-[0_10px_30px_rgba(0,0,0,0.14)] ${isDeficit ? 'border-emerald-200/20 bg-gradient-to-br from-emerald-100/10 via-slate-950/60 to-teal-100/10' : 'border-rose-200/20 bg-gradient-to-br from-rose-100/10 via-slate-950/60 to-pink-100/10'}`}>
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Calories burned (deficit)</div>
+              <div className={`mt-2 text-3xl font-semibold ${isDeficit ? 'text-emerald-300' : 'text-rose-300'}`}>
+                {isDeficit ? '+' : ''}{new Intl.NumberFormat('en-US').format(Math.abs(deficit))} kcal
+              </div>
+              <div className="mt-1 text-sm text-slate-400">
+                {isDeficit
+                  ? `${daysInWindow}-day deficit — ~${fatGrams}g of fat burned`
+                  : `${daysInWindow}-day surplus vs ${new Intl.NumberFormat('en-US').format(MAINTENANCE_CALORIES)} kcal/day maintenance`}
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-400">
+                <div>Maintenance <span className="font-semibold text-slate-300">{new Intl.NumberFormat('en-US').format(maintenance)} kcal</span></div>
+                <div>Consumed <span className="font-semibold text-slate-300">{new Intl.NumberFormat('en-US').format(totalCalories)} kcal</span></div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Analyze button + results */}
+      <div className="mt-6 rounded-[1.75rem] border border-white/10 bg-gradient-to-br from-slate-950 via-slate-950/95 to-violet-100/5 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.2)] sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="text-xs uppercase tracking-[0.24em] text-slate-500">AI Analysis</div>
+            <h3 className="mt-1 text-lg font-semibold text-white">Analyze my progress</h3>
+            <p className="mt-1 text-sm text-slate-400">Get personalized recommendations based on your weight and calorie data.</p>
+          </div>
+          <button
+            type="button"
+            onClick={handleAnalyze}
+            disabled={analyzing}
+            className="inline-flex items-center gap-2 rounded-2xl border border-violet-200/25 bg-violet-100/14 px-5 py-3 font-medium text-violet-100 shadow-sm transition hover:bg-violet-100/22 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <FiActivity className="h-4 w-4" />
+            {analyzing ? 'Analyzing…' : 'Analyze'}
+          </button>
+        </div>
+
+        {(analysisResult || analysisError || analyzing) && (
+          <div className="mt-5">
+            {analyzing && (
+              <div className="space-y-3 animate-pulse">
+                <div className="h-4 w-3/4 rounded-full bg-white/8" />
+                <div className="h-4 w-1/2 rounded-full bg-white/8" />
+                <div className="h-4 w-2/3 rounded-full bg-white/8" />
+              </div>
+            )}
+
+            {analysisError && !analyzing && (
+              <div className="rounded-2xl border border-rose-200/20 bg-rose-100/8 px-4 py-3 text-sm text-rose-300">
+                {analysisError}
+              </div>
+            )}
+
+            {analysisResult && !analyzing && (
+              <div className="space-y-4">
+                {/* Verdict badge */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className={`rounded-full px-4 py-1.5 text-sm font-semibold ${
+                    analysisResult.verdict === 'Great Progress' ? 'bg-emerald-100/18 text-emerald-200 border border-emerald-200/25' :
+                    analysisResult.verdict === 'On Track' ? 'bg-cyan-100/18 text-cyan-200 border border-cyan-200/25' :
+                    analysisResult.verdict === 'Minor Adjustment Needed' ? 'bg-amber-100/18 text-amber-200 border border-amber-200/25' :
+                    'bg-rose-100/18 text-rose-200 border border-rose-200/25'
+                  }`}>
+                    {analysisResult.verdict}
+                  </span>
+                </div>
+
+                {/* Summary */}
+                <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-2">Summary</div>
+                  <p className="text-sm leading-relaxed text-slate-200">{analysisResult.summary}</p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {/* Weight trend */}
+                  <div className="rounded-2xl border border-sky-200/12 bg-sky-100/6 px-4 py-3">
+                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-2">Weight trend</div>
+                    <p className="text-sm leading-relaxed text-slate-300">{analysisResult.weightTrend}</p>
+                  </div>
+
+                  {/* Calorie pattern */}
+                  <div className="rounded-2xl border border-amber-200/12 bg-amber-100/6 px-4 py-3">
+                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-2">Calorie pattern</div>
+                    <p className="text-sm leading-relaxed text-slate-300">{analysisResult.caloriePattern}</p>
+                  </div>
+                </div>
+
+                {/* Daily calorie advice */}
+                <div className="rounded-2xl border border-violet-200/15 bg-violet-100/8 px-4 py-3">
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-2">Daily target advice</div>
+                  <p className="text-sm leading-relaxed text-violet-200">{analysisResult.dailyCalorieAdvice}</p>
+                </div>
+
+                {/* Recommendations */}
+                <div className="rounded-2xl border border-emerald-200/12 bg-emerald-100/6 px-4 py-3">
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500 mb-3">Recommendations</div>
+                  <ul className="space-y-2">
+                    {analysisResult.recommendations.map((rec, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-200">
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100/18 text-xs font-semibold text-emerald-300">{i + 1}</span>
+                        {rec}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => { setAnalysisResult(null); setAnalysisError(null); }}
+                  className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition"
+                >
+                  <FiX className="h-3.5 w-3.5" /> Clear results
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mt-6 rounded-[1.75rem] border border-white/10 bg-gradient-to-br from-slate-950 via-slate-950/95 to-cyan-100/5 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.2)] sm:p-5">
