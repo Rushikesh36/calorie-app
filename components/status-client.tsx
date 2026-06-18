@@ -314,6 +314,26 @@ export default function StatusClient({ logs, weightLogs, rangeLabel, windowDates
   const maxBarCalories = Math.max(dailyCalorieTarget.maximum, ...groupedDays.map((day) => day.calories), 1);
   const totalProgressValue = Math.min((totalCalories / (dailyCalorieTarget.maximum * Math.max(uniqueDays, 1))) * 100, 100);
 
+  const deficitTracking = useMemo(() => {
+    if (!windowDatesParsed || groupedDays.length === 0) return null;
+    const todayKey = new Date().toLocaleDateString('en-CA');
+    const TARGET_DAILY_DEFICIT = 825;
+
+    const completedDays = groupedDays.filter((_, i) => {
+      const date = windowDatesParsed[i];
+      return date.toLocaleDateString('en-CA') !== todayKey;
+    });
+
+    const targetDeficit = TARGET_DAILY_DEFICIT * 7;
+    const achievedDeficit = completedDays.reduce((sum, day) => {
+      return sum + Math.max(0, MAINTENANCE_CALORIES - day.calories);
+    }, 0);
+    const pct = Math.min(100, Math.round((achievedDeficit / targetDeficit) * 100));
+    const gap = targetDeficit - achievedDeficit;
+
+    return { targetDeficit, achievedDeficit, completedDays: completedDays.length, pct, gap };
+  }, [groupedDays, windowDatesParsed]);
+
   async function handleAddWeightLog(e: FormEvent) {
     e.preventDefault();
     const parsedWeight = Number(weightValue);
@@ -517,7 +537,7 @@ Return ONLY a JSON object with exactly these fields (no markdown, no code block)
         </div>
       </div>
 
-      {/* Calories burned card */}
+      {/* Calories burned + deficit target tracker */}
       {(() => {
         const daysInWindow = windowDatesParsed?.length ?? 7;
         const maintenance = MAINTENANCE_CALORIES * daysInWindow;
@@ -526,7 +546,8 @@ Return ONLY a JSON object with exactly these fields (no markdown, no code block)
         const fatGrams = Math.round(Math.max(0, deficit) / 7.7);
 
         return (
-          <div className="mt-4">
+          <div className="mt-4 space-y-3">
+            {/* Calories burned */}
             <div className={`rounded-[1.5rem] border p-4 shadow-[0_10px_30px_rgba(0,0,0,0.14)] ${isDeficit ? 'border-emerald-200/20 bg-gradient-to-br from-emerald-100/10 via-slate-950/60 to-teal-100/10' : 'border-rose-200/20 bg-gradient-to-br from-rose-100/10 via-slate-950/60 to-pink-100/10'}`}>
               <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Calories burned (deficit)</div>
               <div className={`mt-2 text-3xl font-semibold ${isDeficit ? 'text-emerald-300' : 'text-rose-300'}`}>
@@ -542,6 +563,48 @@ Return ONLY a JSON object with exactly these fields (no markdown, no code block)
                 <div>Consumed <span className="font-semibold text-slate-300">{new Intl.NumberFormat('en-US').format(totalCalories)} kcal</span></div>
               </div>
             </div>
+
+            {/* Weekly deficit target vs achieved (last 7 complete days, no today) */}
+            {deficitTracking && (
+              <div className={`rounded-[1.5rem] border p-4 shadow-[0_10px_30px_rgba(0,0,0,0.14)] ${deficitTracking.gap <= 0 ? 'border-emerald-200/20 bg-gradient-to-br from-emerald-100/8 via-slate-950/60 to-teal-100/8' : 'border-amber-200/20 bg-gradient-to-br from-amber-100/8 via-slate-950/60 to-orange-100/8'}`}>
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Weekly deficit target · last 7 days (excl. today)</div>
+                <div className="mt-3 flex items-end justify-between gap-2">
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1">Achieved</div>
+                    <div className={`text-2xl font-semibold ${deficitTracking.gap <= 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                      {new Intl.NumberFormat('en-US').format(deficitTracking.achievedDeficit)} kcal
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-slate-500 mb-1">Target</div>
+                    <div className="text-2xl font-semibold text-slate-300">
+                      {new Intl.NumberFormat('en-US').format(deficitTracking.targetDeficit)} kcal
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-white/8">
+                  <div
+                    className={`h-full rounded-full transition-all ${deficitTracking.gap <= 0 ? 'bg-gradient-to-r from-emerald-300 to-teal-300' : 'bg-gradient-to-r from-amber-300 to-orange-300'}`}
+                    style={{ width: `${deficitTracking.pct}%` }}
+                  />
+                </div>
+
+                <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+                  <span>{deficitTracking.pct}% of weekly target</span>
+                  <span>
+                    {deficitTracking.gap > 0
+                      ? `${new Intl.NumberFormat('en-US').format(deficitTracking.gap)} kcal short`
+                      : `${new Intl.NumberFormat('en-US').format(Math.abs(deficitTracking.gap))} kcal over target`}
+                  </span>
+                </div>
+
+                <div className="mt-2 text-xs text-slate-500">
+                  825 kcal/day × 7 days = {new Intl.NumberFormat('en-US').format(deficitTracking.targetDeficit)} kcal target · based on {deficitTracking.completedDays} completed days
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}
