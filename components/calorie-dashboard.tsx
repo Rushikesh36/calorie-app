@@ -136,8 +136,8 @@ function getTimeSlotControlClass(slot: string) {
   }
 }
 
-const calorieTarget = { low: 1900, high: 2100 };
-const macroTargets = { protein: 120, carbs: 220, fat: 70 };
+const calorieTarget = { low: 1650, high: 1750 };
+const macroTargets = { protein: 140, carbs: 170, fat: 54 };
 
 function clampPercent(value: number) {
   return Math.max(0, Math.min(value, 100));
